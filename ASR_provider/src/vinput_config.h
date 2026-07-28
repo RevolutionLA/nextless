@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #include <curl/curl.h>
@@ -117,5 +119,35 @@ inline CURL* getCurl() {
     if (!handle.curl) return nullptr;
     return handle;
 }
+
+inline int cancelCurl(void *clientp, curl_off_t, curl_off_t,
+                      curl_off_t, curl_off_t) {
+    auto *cancel = static_cast<std::atomic_bool *>(clientp);
+    return cancel && cancel->load() ? 1 : 0;
+}
+
+class CurlCancellationScope {
+public:
+    CurlCancellationScope(CURL *curl,
+                          std::shared_ptr<std::atomic_bool> cancel)
+        : curl_(curl), cancel_(std::move(cancel)) {
+        curl_easy_setopt(curl_, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFOFUNCTION, cancelCurl);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFODATA, cancel_.get());
+    }
+
+    ~CurlCancellationScope() {
+        curl_easy_setopt(curl_, CURLOPT_NOPROGRESS, 1L);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFOFUNCTION, nullptr);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFODATA, nullptr);
+    }
+
+    CurlCancellationScope(const CurlCancellationScope &) = delete;
+    CurlCancellationScope &operator=(const CurlCancellationScope &) = delete;
+
+private:
+    CURL *curl_;
+    std::shared_ptr<std::atomic_bool> cancel_;
+};
 
 } // namespace vinput

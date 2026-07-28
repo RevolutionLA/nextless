@@ -10,6 +10,27 @@ Voice input addon for [fcitx5](https://github.com/fcitx/fcitx5). Push-to-talk sp
 | Switch ASR provider | **Ctrl+CapsLock**, then **←/→** |
 | Switch denoiser | **Ctrl+CapsLock**, then **↑/↓** |
 
+### Recognition status and consecutive speech
+
+The input panel beside the cursor reports the current phase:
+
+```
+listening → processing audio → recognizing → result or an actionable error
+```
+
+You may begin the next recording while an earlier cloud request is still
+recognizing. Vinput preserves capture and commit order, and binds each result
+to the application and input context active when that recording began.
+
+To prevent unbounded memory and service requests, at most three recognitions
+(including the active request) are accepted at once. When the queue is full,
+Vinput shows `recognition queue full; try again` and discards only the newest
+recording.
+
+Cloud failures are shown in the input panel as network, service, timeout,
+microphone, or no-speech errors. These messages are status UI, not text
+inserted into the application.
+
 ## ASR Backends
 
 | Provider | Type | Requires |
@@ -146,6 +167,13 @@ Tracked files under `config/*.json.example` are examples only. Runtime `*.json` 
 | `advanced.json` | All tunables: model paths, thread counts, timeouts, audio params, copy from `config/advanced.json.example` |
 | `audio.json` | Denoiser: `"none"` \| `"speexdsp"` \| `"deepfilter"`, copy from `config/audio.json.example` |
 
+### Cloud polling
+
+`advanced.json` has an optional `doubao` section. `poll_interval_msec` is the
+normal polling interval (default `800`); the first query is made after 300ms
+to reduce short-utterance latency, then the normal interval is restored. Keep
+the default unless the API's QPS limit requires a slower cadence.
+
 ## Dependencies
 
 | Library | Arch Package |
@@ -162,6 +190,20 @@ Tracked files under `config/*.json.example` are examples only. Runtime `*.json` 
 ```
 PulseAudio → ebur128 norm (-16 LUFS) → denoise → VAD trim → WAV → ASR → commit
 ```
+
+Capture uses an asynchronous PulseAudio stream. Releasing CapsLock returns
+immediately while Vinput retains a short tail window before starting audio
+processing, avoiding both input-method stalls and clipped final syllables.
+
+## Reliability Notes
+
+- Doubao and Qwen use a persistent serialized worker. This retains curl
+  connection state across requests while preserving result order.
+- Local Zipformer and FireRed runs remain one process per utterance. This is
+  intentional; no long-running local model server is required.
+- On niri, Vinput uses the compositor's Unix IPC socket for focus capture and
+  result restoration. Other desktops fall back to their configured strategy
+  or direct commit.
 
 ## License
 

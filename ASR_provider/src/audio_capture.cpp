@@ -1,8 +1,7 @@
 #include "audio_capture.h"
-#include "buffer_detect.h"
 #include "vinput_config.h"
 
-#include <pulse/simple.h>
+#include <pulse/mainloop.h>
 #include <pulse/error.h>
 #include <speex/speex_preprocess.h>
 #include <soxr.h>
@@ -12,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <fstream>
 #include <filesystem>
@@ -19,6 +19,32 @@
 #include <cstdlib>
 
 namespace vinput {
+
+namespace {
+std::atomic<uint64_t> nextCaptureId{0};
+std::mutex deepFilterMutex;
+std::mutex pulseCaptureMutex;
+std::mutex audioProcessingMutex;
+std::condition_variable audioProcessingReady;
+uint64_t nextProcessingTicket = 0;
+uint64_t nextProcessingId = 0;
+
+class ProcessingTurn {
+public:
+    explicit ProcessingTurn(uint64_t id) : lock_(audioProcessingMutex) {
+        audioProcessingReady.wait(lock_, [id] { return id == nextProcessingId; });
+    }
+
+    ~ProcessingTurn() {
+        ++nextProcessingId;
+        lock_.unlock();
+        audioProcessingReady.notify_all();
+    }
+
+private:
+    std::unique_lock<std::mutex> lock_;
+};
+}
 
 double AudioCapture::lufsTarget_ = -16.0;
 int AudioCapture::speexLevel_ = -15;
@@ -84,8 +110,8 @@ AudioCapture::AudioCapture() {
 }
 
 AudioCapture::~AudioCapture() {
-    stopRequested_ = true;
-    if (recordThread_.joinable()) recordThread_.join();
+    stop();
+    wait();
 }
 
 void AudioCapture::processSamples(std::vector<int16_t> &samples, const std::string &denoiser) {
@@ -113,61 +139,171 @@ void AudioCapture::start() {
         samples_.clear();
     }
     stopRequested_ = false;
-    wavPath_ = "/tmp/vinput_cap_" + std::to_string(getpid()) + "_"
-               + std::to_string(time(nullptr)) + ".wav";
+    finished_ = false;
+    captureId_ = nextCaptureId.fetch_add(1);
+    wavPath_ = "/tmp/vinput_cap_" + std::to_string(getpid()) + "_" +
+               std::to_string(captureId_) + ".wav";
     if (onState_) onState_(true);
     recordThread_ = std::thread(&AudioCapture::recordLoop, this);
 }
 
 void AudioCapture::stop() {
     stopRequested_ = true;
+    std::lock_guard<std::mutex> lock(pulseMutex_);
+    if (pulseMainloop_) pa_mainloop_wakeup(pulseMainloop_);
+}
+
+void AudioCapture::wait() {
     if (recordThread_.joinable()) recordThread_.join();
 }
 
+void AudioCapture::contextStateCallback(pa_context *, void *userdata) {
+    auto *self = static_cast<AudioCapture *>(userdata);
+    std::lock_guard<std::mutex> lock(self->pulseMutex_);
+    if (self->pulseMainloop_) pa_mainloop_wakeup(self->pulseMainloop_);
+}
+
+void AudioCapture::streamStateCallback(pa_stream *, void *userdata) {
+    auto *self = static_cast<AudioCapture *>(userdata);
+    std::lock_guard<std::mutex> lock(self->pulseMutex_);
+    if (self->pulseMainloop_) pa_mainloop_wakeup(self->pulseMainloop_);
+}
+
+void AudioCapture::streamReadCallback(pa_stream *stream, size_t, void *userdata) {
+    auto *self = static_cast<AudioCapture *>(userdata);
+    while (true) {
+        const void *data = nullptr;
+        size_t bytes = 0;
+        if (pa_stream_peek(stream, &data, &bytes) < 0 || bytes == 0) break;
+        if (data) {
+            const auto *samples = static_cast<const int16_t *>(data);
+            self->samples_.insert(self->samples_.end(), samples,
+                                  samples + bytes / sizeof(int16_t));
+        }
+        if (pa_stream_drop(stream) < 0) break;
+    }
+}
+
 void AudioCapture::recordLoop() {
-
-    pa_sample_spec ss;
-    ss.format = PA_SAMPLE_S16LE;
-    ss.rate = 16000;
-    ss.channels = 1;
-
-    int error = 0;
+    std::unique_lock<std::mutex> pulseSessionLock(pulseCaptureMutex);
+    const uint64_t processingTicket = nextProcessingTicket++;
+    const pa_sample_spec ss{PA_SAMPLE_S16LE, 16000, 1};
     auto t0 = std::chrono::steady_clock::now();
-    pa_simple *pa = pa_simple_new(nullptr, "vinput-cap", PA_STREAM_RECORD,
-                                  nullptr, "voice", &ss, nullptr, nullptr, &error);
-    if (!pa) {
-        fprintf(stderr, "Vinput Capture: PA error: %s\n", pa_strerror(error));
-        return;
-    }
-    auto tPaOpen = std::chrono::steady_clock::now();
-
-    if (bufferBytes_ == 0) {
-        bufferBytes_ = loadOrDetectBufferBytes([this](const std::string &msg) {
-            if (onStatusText_) onStatusText_(msg);
-        });
-    }
-    std::vector<uint8_t> buf(bufferBytes_);
-    size_t kFrameCount = buf.size() / 2;
+    pa_mainloop *mainloop = pa_mainloop_new();
+    pa_context *context = nullptr;
+    pa_stream *stream = nullptr;
+    bool readFailed = false;
+    int error = PA_OK;
     int nReads = 0;
-    while (!stopRequested_) {
-        if (pa_simple_read(pa, buf.data(), buf.size(), &error) < 0) break;
-        auto *p = reinterpret_cast<int16_t *>(buf.data());
-        std::lock_guard<std::mutex> lk(sampleMutex_);
-        samples_.insert(samples_.end(), p, p + kFrameCount);
-        nReads++;
+
+    if (!mainloop) {
+        readFailed = true;
+    } else {
+        {
+            std::lock_guard<std::mutex> lock(pulseMutex_);
+            pulseMainloop_ = mainloop;
+        }
+        context = pa_context_new(pa_mainloop_get_api(mainloop), "vinput-cap");
+        if (!context) {
+            readFailed = true;
+        } else {
+            pa_context_set_state_callback(context, contextStateCallback, this);
+            if (pa_context_connect(context, nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0) {
+                readFailed = true;
+            }
+        }
+    }
+
+    while (!readFailed && !stopRequested_) {
+        auto state = pa_context_get_state(context);
+        if (state == PA_CONTEXT_READY) break;
+        if (!PA_CONTEXT_IS_GOOD(state) || pa_mainloop_iterate(mainloop, 1, nullptr) < 0) {
+            readFailed = true;
+        }
+    }
+
+    if (!readFailed && !stopRequested_) {
+        stream = pa_stream_new(context, "voice", &ss, nullptr);
+        if (!stream) {
+            readFailed = true;
+        } else {
+            pa_stream_set_state_callback(stream, streamStateCallback, this);
+            pa_stream_set_read_callback(stream, streamReadCallback, this);
+            pa_buffer_attr attr{};
+            attr.maxlength = static_cast<uint32_t>(-1);
+            attr.fragsize = 3200; // 100 ms at 16 kHz mono S16.
+            if (pa_stream_connect_record(stream, nullptr, &attr,
+                                         PA_STREAM_ADJUST_LATENCY) < 0) {
+                readFailed = true;
+            }
+        }
+    }
+
+    while (!readFailed && !stopRequested_) {
+        auto state = pa_stream_get_state(stream);
+        if (state == PA_STREAM_READY) break;
+        if (!PA_STREAM_IS_GOOD(state) || pa_mainloop_iterate(mainloop, 1, nullptr) < 0) {
+            readFailed = true;
+        }
+    }
+
+    auto tPaOpen = std::chrono::steady_clock::now();
+    bool stopping = stopRequested_;
+    auto stopDeadline = std::chrono::steady_clock::time_point::max();
+    while (!readFailed && stream) {
+        if (stopRequested_ && !stopping) stopping = true;
+        if (stopping && stopDeadline == std::chrono::steady_clock::time_point::max()) {
+            stopDeadline = std::chrono::steady_clock::now() +
+                           std::chrono::milliseconds(120);
+        }
+        if (stopping && std::chrono::steady_clock::now() >= stopDeadline) break;
+
+        int dispatched = pa_mainloop_iterate(mainloop, stopping ? 0 : 1, nullptr);
+        if (dispatched < 0 || !PA_STREAM_IS_GOOD(pa_stream_get_state(stream))) {
+            readFailed = true;
+            break;
+        }
+        if (dispatched > 0) nReads += dispatched;
+        if (stopping) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     auto tRecordEnd = std::chrono::steady_clock::now();
 
-    if (onState_) onState_(false);
-
-    pa_simple_free(pa);
+    if (stream) {
+        pa_stream_set_read_callback(stream, nullptr, nullptr);
+        pa_stream_disconnect(stream);
+        pa_stream_unref(stream);
+    }
+    if (context) {
+        error = pa_context_errno(context);
+        pa_context_disconnect(context);
+        pa_context_unref(context);
+    }
+    {
+        std::lock_guard<std::mutex> lock(pulseMutex_);
+        pulseMainloop_ = nullptr;
+    }
+    if (mainloop) pa_mainloop_free(mainloop);
+    pulseSessionLock.unlock();
+    ProcessingTurn processingTurn(processingTicket);
     auto tPaClose = std::chrono::steady_clock::now();
 
-    fprintf(stderr, "Vinput Capture [timer] pa_open=%ldms record=%ldms pa_close=%ldms n_reads=%d samples=%zu\n",
+    if (onState_) onState_(false);
+
+    fprintf(stderr, "Vinput Capture [timer] pa_open=%ldms record=%ldms pa_close=%ldms events=%d samples=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tPaOpen - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecordEnd - tPaOpen).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tPaClose - tRecordEnd).count(),
             nReads, samples_.size());
+
+    if (readFailed) {
+        fprintf(stderr, "Vinput Capture: read error: %s\n", pa_strerror(error));
+        if (onStatusText_) onStatusText_("Vinput: microphone read failed");
+        std::lock_guard<std::mutex> lk(sampleMutex_);
+        samples_.clear();
+        unlink(wavPath_.c_str());
+        finished_ = true;
+        return;
+    }
 
     std::vector<int16_t> batch;
     {
@@ -189,11 +325,17 @@ void AudioCapture::recordLoop() {
         // Step 4: trim silence (now that denoiser has processed the noise)
         trimSilence(batch);
 
-        // Step 5: write WAV
-        writeWav(batch, wavPath_);
-
-        // Fire callback — ASR starts immediately if voice detected
-        if (!isBlank && onRecorded_) onRecorded_(batch, wavPath_);
+        // ASR providers consume the WAV; blank or unobserved captures do not
+        // need a temporary file.
+        if (!isBlank && onRecorded_) {
+            writeWav(batch, wavPath_);
+            onRecorded_(batch, wavPath_);
+        } else if (isBlank) {
+            unlink(wavPath_.c_str());
+            if (onStatusText_) onStatusText_("Vinput: no speech detected");
+        } else {
+            unlink(wavPath_.c_str());
+        }
 
         fprintf(stderr, "Vinput Capture [pipeline] loudness=%.1f isBlank=%d denoiser=%s samples=%zu\n",
                 loudness, (int)isBlank, denoiseMethod_.c_str(), batch.size());
@@ -202,7 +344,10 @@ void AudioCapture::recordLoop() {
             std::lock_guard<std::mutex> lk(sampleMutex_);
             samples_ = std::move(batch);
         }
+    } else if (!readFailed && onStatusText_) {
+        onStatusText_("Vinput: no audio captured");
     }
+    finished_ = true;
 }
 
 void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string &method) {
@@ -242,6 +387,7 @@ void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string
 }
 
 void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
+    std::lock_guard<std::mutex> lock(deepFilterMutex);
     auto t0 = std::chrono::steady_clock::now();
 
     // Lazy-start deep-filter daemon with --stay (model loaded once)

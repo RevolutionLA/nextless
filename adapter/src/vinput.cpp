@@ -22,13 +22,16 @@
 #include <sys/ioctl.h>
 #include <linux/uinput.h>
 #include <string.h>
+#include <atomic>
 #include <mutex>
 #include <vector>
 #include <spawn.h>
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+#include <deque>
 #include <fstream>
+#include <optional>
 
 // Vinput ASR provider 接口
 #include "asr_provider.h"
@@ -60,8 +63,21 @@ FCITX_CONFIGURATION(
 // VinputAddon — Vinput 语音输入插件的 addon 主体
 // 继承 AddonInstance, fcitx5 加载 addon 时实例化此类
 class VinputAddon : public fcitx::AddonInstance {
+    struct CallbackGate {
+        std::mutex mutex;
+        VinputAddon *owner = nullptr;
+    };
+
+    template<typename Callback>
+    static void withOwner(const std::shared_ptr<CallbackGate> &gate,
+                          Callback &&callback) {
+        std::lock_guard<std::mutex> lock(gate->mutex);
+        if (gate->owner) callback(*gate->owner);
+    }
+
 public:
     VinputAddon(fcitx::Instance *instance) : instance_(instance) {
+        callbackGate_->owner = this;
         reloadConfig();
 
         auto vjson = vinput::readConfigFile("vinput.json");
@@ -89,6 +105,22 @@ public:
     }
 
     ~VinputAddon() override {
+        {
+            std::lock_guard<std::mutex> lock(callbackGate_->mutex);
+            callbackGate_->owner = nullptr;
+        }
+        shuttingDown_ = true;
+        if (audioCapture_) audioCapture_->stop();
+        for (auto &capture : finishingCaptures_) capture->stop();
+        if (audioCapture_) audioCapture_->wait();
+        for (auto &capture : finishingCaptures_) capture->wait();
+        audioCapture_.reset();
+        finishingCaptures_.clear();
+        asr_.reset();
+        for (const auto &request : recognitionQueue_) {
+            unlink(request.wavPath.c_str());
+        }
+        recognitionQueue_.clear();
         if (uinputFd_ >= 0) {
             ioctl(uinputFd_, UI_DEV_DESTROY);
             close(uinputFd_);
@@ -197,17 +229,34 @@ private:
     // 状态
     bool active_ = false;               // 语音录音中
     bool switchActive_ = false;         // Ctrl+CapsLock 切换模式
+    std::atomic_bool shuttingDown_{false};
+    std::shared_ptr<CallbackGate> callbackGate_ =
+        std::make_shared<CallbackGate>();
 
     // 性能计时
     std::chrono::steady_clock::time_point tPress_, tActivate_, tStop_;
     std::unique_ptr<fcitx::EventSourceTime> timer_;
     std::unique_ptr<vinput::IAsrProvider> asr_;
+    std::string asrProviderId_;
     std::unique_ptr<vinput::AudioCapture> audioCapture_;
+    std::vector<std::unique_ptr<vinput::AudioCapture>> finishingCaptures_;
+    vinput::OutputTarget currentTarget_;
     fcitx::InputContext *currentIC_ = nullptr;
     fcitx::ICUUID currentUuid_ = {};  // 用于 deactivate 后仍能查找 IC
     std::string lastPreeditText_;       // deactivate 时 commit 用
     int providerIndex_ = 0;
     int denoiserIndex_ = 0;
+
+    struct RecognitionRequest {
+        std::vector<int16_t> samples;
+        std::string wavPath;
+        std::string providerId;
+        vinput::OutputTarget target;
+        std::chrono::steady_clock::time_point pressTime;
+    };
+    static constexpr size_t kMaxPendingRecognitions = 3;
+    std::deque<RecognitionRequest> recognitionQueue_;
+    std::optional<RecognitionRequest> activeRecognition_;
 
     static const std::vector<std::string>& denoiserList() {
         static const std::vector<std::string> list = {"none", "speexdsp", "deepfilter"};
@@ -327,7 +376,6 @@ private:
             }
             if (timer_ || active_ || switchActive_) return;
             tPress_ = std::chrono::steady_clock::now();
-            if (outputHandler_) outputHandler_->setPressTime(tPress_);
             currentIC_ = keyEvent.inputContext();
             if (currentIC_) {
                 currentUuid_ = currentIC_->uuid();
@@ -394,6 +442,7 @@ private:
 
     // 长按 500ms 后触发
     void onActivate() {
+        reapFinishedCaptures();
         timer_.reset();
         tActivate_ = std::chrono::steady_clock::now();
         auto pressMs = std::chrono::duration_cast<std::chrono::milliseconds>(tActivate_ - tPress_).count();
@@ -413,7 +462,10 @@ private:
         }
 
         // 捕获当前焦点窗口 (通过 OutputHandler 的桌面策略)
-        if (outputHandler_) outputHandler_->captureCurrentWindow();
+        if (outputHandler_) {
+            currentTarget_ = outputHandler_->captureCurrentWindow();
+            outputHandler_->showStatus(currentTarget_, "Vinput: listening...");
+        }
         FCITX_INFO() << "Vinput [activate] captured window";
 
         auto list = vinput::AsrProviderRegistry::instance().listFactories();
@@ -431,17 +483,11 @@ private:
             }
         }
 
-        asr_ = vinput::AsrProviderRegistry::instance().create(
-            list[providerIndex_].first);
-
-        if (!asr_) {
-            FCITX_INFO() << "Vinput: failed to create ASR provider";
-            return;
-        }
-
         active_ = true;
-        applyAsrConfig();
-        setupAsrCallbacks();
+        const auto providerId = list[providerIndex_].first;
+        const auto target = currentTarget_;
+        const auto pressTime = tPress_;
+        auto callbackGate = callbackGate_;
 
         audioCapture_ = std::make_unique<vinput::AudioCapture>();
         {
@@ -471,42 +517,132 @@ private:
                 }
             }
         }
-        audioCapture_->setRecordedCallback([this](const std::vector<int16_t> &samples, const std::string &wav) {
-            if (asr_) asr_->transcribe(samples, wav);
+        audioCapture_->setRecordedCallback([callbackGate, providerId, target, pressTime](
+                                               const std::vector<int16_t> &samples,
+                                               const std::string &wav) {
+            std::lock_guard<std::mutex> lock(callbackGate->mutex);
+            auto *owner = callbackGate->owner;
+            if (!owner) {
+                unlink(wav.c_str());
+                return;
+            }
+            auto request = std::make_shared<RecognitionRequest>(RecognitionRequest{
+                samples, wav, providerId, target, pressTime});
+            owner->outputHandler_->showStatus(
+                target, "Vinput: recognizing...",
+                [callbackGate, request = std::move(request)] {
+                    withOwner(callbackGate, [&](VinputAddon &owner) {
+                        owner.enqueueRecognition(std::move(*request));
+                    });
+                });
         });
         audioCapture_->setStateCallback([](bool active) {
             FCITX_INFO() << "Vinput ASR state: " << (active ? "on" : "off");
         });
-        audioCapture_->setStatusTextCallback([this](const std::string &text) {
-            if (outputHandler_) outputHandler_->showStatus(text);
+        audioCapture_->setStatusTextCallback([callbackGate, target](const std::string &text) {
+            withOwner(callbackGate, [&](VinputAddon &owner) {
+                owner.outputHandler_->showStatus(target, text);
+            });
         });
 
         playSound("activate");
         audioCapture_->start();
     }
 
-    // 注册 ASR 回调
-    void setupAsrCallbacks() {
-        if (!asr_) return;
-        auto tPress = tPress_;
-        asr_->setResultCallback([this, tPress](const std::string &text, bool isFinal) {
+    void enqueueRecognition(RecognitionRequest request) {
+        if (shuttingDown_) {
+            unlink(request.wavPath.c_str());
+            return;
+        }
+        if (recognitionQueue_.size() + (activeRecognition_ ? 1 : 0) >=
+            kMaxPendingRecognitions) {
+            unlink(request.wavPath.c_str());
+            outputHandler_->showStatus(request.target,
+                                       "Vinput: recognition queue full; try again");
+            return;
+        }
+        recognitionQueue_.push_back(std::move(request));
+        dispatchNextRecognition();
+    }
+
+    bool ensureAsrProvider(const std::string &providerId) {
+        if (asr_ && asrProviderId_ == providerId) return true;
+        asr_.reset();
+        asr_ = vinput::AsrProviderRegistry::instance().create(providerId);
+        asrProviderId_ = asr_ ? providerId : std::string{};
+        return static_cast<bool>(asr_);
+    }
+
+    void dispatchNextRecognition() {
+        if (activeRecognition_ || recognitionQueue_.empty() || shuttingDown_) return;
+        activeRecognition_ = std::move(recognitionQueue_.front());
+        recognitionQueue_.pop_front();
+
+        if (!ensureAsrProvider(activeRecognition_->providerId)) {
+            auto target = activeRecognition_->target;
+            unlink(activeRecognition_->wavPath.c_str());
+            activeRecognition_.reset();
+            outputHandler_->showStatus(target, "Vinput: ASR provider unavailable",
+                                       [callbackGate = callbackGate_] {
+                                           withOwner(callbackGate, [](VinputAddon &owner) {
+                                               owner.dispatchNextRecognition();
+                                           });
+                                       });
+            return;
+        }
+
+        auto target = activeRecognition_->target;
+        auto tPress = activeRecognition_->pressTime;
+        auto callbackGate = callbackGate_;
+        asr_->setResultCallback([callbackGate, target, tPress](const std::string &text, bool isFinal) {
             auto tResult = std::chrono::steady_clock::now();
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tPress).count();
             fprintf(stderr, "Vinput [timer] press→result=%ldms\n", ms);
             FCITX_INFO() << "Vinput ASR result: " << text
                          << " (final=" << isFinal << ")";
-            if (outputHandler_) outputHandler_->submit(text);
+            withOwner(callbackGate, [&](VinputAddon &owner) {
+                owner.outputHandler_->submit(target, text, [callbackGate, target] {
+                    withOwner(callbackGate, [&](VinputAddon &owner) {
+                        owner.outputHandler_->showStatus(target, "");
+                        owner.finishRecognition();
+                    });
+                });
+            });
         });
-        asr_->setErrorCallback([this](const std::string &error) {
-            onAsrError(error);
+        asr_->setErrorCallback([callbackGate, target](const std::string &error) {
+            FCITX_INFO() << "Vinput ASR error: " << error;
+            std::string status = "Vinput: recognition failed";
+            if (error.find("network") != std::string::npos) {
+                status = "Vinput: network error; try again";
+            } else if (error.find("timed out") != std::string::npos) {
+                status = "Vinput: recognition timed out; try again";
+            } else if (error.find("service unavailable") != std::string::npos) {
+                status = "Vinput: recognition service unavailable; try again";
+            } else if (error.find("no speech") != std::string::npos ||
+                       error.find("empty result") != std::string::npos) {
+                status = "Vinput: no speech recognized";
+            }
+            withOwner(callbackGate, [&](VinputAddon &owner) {
+                owner.outputHandler_->showStatus(target, status, [callbackGate] {
+                    withOwner(callbackGate, [](VinputAddon &owner) {
+                        owner.finishRecognition();
+                    });
+                });
+            });
         });
+        asr_->transcribe(std::move(activeRecognition_->samples),
+                         activeRecognition_->wavPath);
     }
 
-    // 注入配置到 ASR 后端
-    void applyAsrConfig() {
-        if (!asr_) return;
-        // 后端配置通过 setConfig() 注入
-        // 目前 zipformer 后端使用默认模型路径
+    void finishRecognition() {
+        activeRecognition_.reset();
+        dispatchNextRecognition();
+    }
+
+    void reapFinishedCaptures() {
+        std::erase_if(finishingCaptures_, [](const auto &capture) {
+            return capture->finished();
+        });
     }
 
     // 松键后结束
@@ -517,11 +653,10 @@ private:
         FCITX_INFO() << "Vinput deactivated (record=" << recMs << "ms)";
 
         if (audioCapture_) {
+            outputHandler_->showStatus(currentTarget_, "Vinput: processing audio...");
             audioCapture_->stop();
-            // transcribe already triggered from RecordedCallback during stop()
-            audioCapture_.reset();
+            finishingCaptures_.push_back(std::move(audioCapture_));
         }
-        asr_.reset();
         currentIC_ = nullptr;
 
         // commit 最后收到的 preedit 文本
@@ -544,10 +679,6 @@ private:
         }
     }
 
-    // ASR 错误回调
-    void onAsrError(const std::string &error) {
-        FCITX_INFO() << "Vinput ASR error: " << error;
-    }
 };
 
 // VinputFactory — Vinput 插件的工厂类

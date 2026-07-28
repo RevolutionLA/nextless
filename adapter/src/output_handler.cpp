@@ -2,13 +2,16 @@
 #include "desktop_strategy.h"
 #include "vinput_config.h"
 
+#include <fcitx/inputpanel.h>
 #include <fcitx/inputcontextmanager.h>
+#include <fcitx/text.h>
 #include <fcitx-utils/log.h>
 
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 namespace vinput {
 
@@ -17,8 +20,7 @@ OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
     FCITX_INFO() << "Vinput OutputHandler: auto-detected strategy=" << desktop_->name();
 
     if (pipe(wakePipe_) != 0) {
-        FCITX_ERROR() << "Vinput: OutputHandler pipe() failed";
-        return;
+        throw std::runtime_error("Vinput: OutputHandler pipe() failed");
     }
     fcntl(wakePipe_[0], F_SETFL, O_NONBLOCK);
     fcntl(wakePipe_[1], F_SETFL, O_NONBLOCK);
@@ -29,6 +31,12 @@ OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
             drainAndCommit();
             return true;
         });
+    if (!wakeWatcher_) {
+        close(wakePipe_[0]);
+        close(wakePipe_[1]);
+        wakePipe_[0] = wakePipe_[1] = -1;
+        throw std::runtime_error("Vinput: failed to create output event source");
+    }
 }
 
 OutputHandler::~OutputHandler() {
@@ -36,39 +44,43 @@ OutputHandler::~OutputHandler() {
     if (wakePipe_[1] >= 0) close(wakePipe_[1]);
 }
 
-void OutputHandler::submit(const std::string &text) {
-    enqueue(text, false);
+void OutputHandler::submit(const OutputTarget &target, const std::string &text,
+                           std::function<void()> onCommitted) {
+    enqueue(target, text, false, std::move(onCommitted));
 }
 
-void OutputHandler::showStatus(const std::string &text) {
-    enqueue(text, true);
+void OutputHandler::showStatus(const OutputTarget &target,
+                               const std::string &text,
+                               std::function<void()> onShown) {
+    enqueue(target, text, true, std::move(onShown));
 }
 
-void OutputHandler::setCaptureWindow(const std::string &winId) {
-    capturedWinId_ = winId;
-}
-
-void OutputHandler::captureCurrentWindow() {
-    desktop_ = DesktopStrategy::autoDetect();
+OutputTarget OutputHandler::captureCurrentWindow() {
     FCITX_INFO() << "Vinput [capture] detected desktop=" << desktop_->name();
-    capturedWinId_ = desktop_->getFocusedWindowId();
+    auto capturedWinId = desktop_->getFocusedWindowId();
+    OutputTarget target;
+    target.windowId = capturedWinId;
+    target.statusSequence = ++latestStatusSequence_;
+    if (auto *ic = instance_->mostRecentInputContext()) {
+        target.uuid = ic->uuid();
+    }
+    return target;
 }
 
-void OutputHandler::clearCaptureWindow() {
-    capturedWinId_.clear();
+void OutputHandler::wake() {
+    char c = 1;
+    while (write(wakePipe_[1], &c, 1) < 0 && errno == EINTR) {}
 }
 
-void OutputHandler::setPressTime(std::chrono::steady_clock::time_point t) {
-    tPress_ = t;
-}
-
-void OutputHandler::enqueue(const std::string &text, bool isStatus) {
+void OutputHandler::enqueue(const OutputTarget &target, const std::string &text,
+                            bool isStatus,
+                            std::function<void()> completion) {
     {
         std::lock_guard<std::mutex> lk(pendingMutex_);
-        pending_.push_back({text, isStatus});
+        pending_.push_back({text, isStatus, target.uuid, target.windowId,
+                            target.statusSequence, std::move(completion)});
     }
-    char c = 1;
-    (void)!write(wakePipe_[1], &c, 1);
+    wake();
 }
 
 void OutputHandler::drainAndCommit() {
@@ -81,96 +93,121 @@ void OutputHandler::drainAndCommit() {
         batch.swap(pending_);
     }
 
-    // Status texts: directly commit to current IC
+    // Status belongs in the input panel, never in the application's document.
     for (auto &p : batch) {
         if (!p.isStatus) continue;
-        auto *ic = instance_->mostRecentInputContext();
-        if (ic && !p.text.empty()) ic->commitString(p.text);
+        if (p.statusSequence < latestStatusSequence_) {
+            if (p.completion) p.completion();
+            continue;
+        }
+        auto *ic = instance_->inputContextManager().findByUUID(p.targetUuid);
+        if (ic) {
+            ic->inputPanel().setAuxUp(fcitx::Text(p.text));
+            ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        }
+        if (p.completion) p.completion();
     }
 
-    // Check if any non-status items need committing
-    bool hasCommit = false;
     for (auto &p : batch) {
-        if (!p.isStatus) { hasCommit = true; break; }
+        if (!p.isStatus) commitQueue_.push_back(std::move(p));
     }
-    if (!hasCommit) return;
+    dispatchNextCommit();
+}
 
-    // No captured window or strategy doesn't support switching → direct commit
-    if (capturedWinId_.empty() || !desktop_->supportsSwitching()) {
-        commitBatch(batch, "commit");
-        return;
+void OutputHandler::dispatchNextCommit() {
+    if (pendingNiriCommit_) return;
+    niriPollTimer_.reset();
+
+    while (!commitQueue_.empty()) {
+        Pending pending = std::move(commitQueue_.front());
+        commitQueue_.pop_front();
+        const auto capturedId = pending.capturedWinId;
+
+        if (capturedId.empty() || !desktop_->supportsSwitching()) {
+            commitPending(std::move(pending), "commit");
+            continue;
+        }
+
+        auto restoreId = desktop_->getFocusedWindowId();
+        if (restoreId.empty()) {
+            FCITX_INFO() << "Vinput [" << desktop_->name()
+                         << "] failed to get focused window, direct commit";
+            commitPending(std::move(pending), "commit");
+            continue;
+        }
+        if (restoreId == capturedId) {
+            FCITX_INFO() << "Vinput [" << desktop_->name()
+                         << "] window unchanged, direct commit";
+            commitPending(std::move(pending), "commit");
+            continue;
+        }
+
+        FCITX_INFO() << "Vinput [" << desktop_->name() << "] captured="
+                     << capturedId << " restore=" << restoreId;
+        desktop_->focusWindow(capturedId);
+        pendingNiriCommit_ = std::move(pending);
+        pendingCapturedId_ = capturedId;
+        pendingRestoreId_ = std::move(restoreId);
+        niriRetryCount_ = 0;
+
+        niriPollTimer_ = instance_->eventLoop().addTimeEvent(
+            CLOCK_MONOTONIC,
+            fcitx::now(CLOCK_MONOTONIC) + kNiriRetryIntervalUsec,
+            kNiriRetryIntervalUsec,
+            [this](fcitx::EventSourceTime *, uint64_t) -> bool {
+                return niriPollTick();
+            });
+        if (niriPollTimer_) return;
+
+        FCITX_ERROR() << "Vinput: failed to create focus polling timer; committing directly";
+        commitPending(std::move(*pendingNiriCommit_), "commit");
+        pendingNiriCommit_.reset();
+        if (!pendingRestoreId_.empty() && pendingRestoreId_ != pendingCapturedId_) {
+            desktop_->focusWindow(pendingRestoreId_);
+        }
+        pendingCapturedId_.clear();
+        pendingRestoreId_.clear();
     }
-
-    auto restoreId = desktop_->getFocusedWindowId();
-    if (restoreId.empty()) {
-        FCITX_INFO() << "Vinput [" << desktop_->name() << "] failed to get focused window, direct commit";
-        commitBatch(batch, "commit");
-        return;
-    }
-
-    if (restoreId == capturedWinId_) {
-        FCITX_INFO() << "Vinput [" << desktop_->name() << "] window unchanged, direct commit";
-        commitBatch(batch, "commit");
-        return;
-    }
-
-    auto capturedId = capturedWinId_;
-    FCITX_INFO() << "Vinput [" << desktop_->name() << "] captured=" << capturedId
-                 << " restore=" << restoreId;
-
-    desktop_->focusWindow(capturedId);
-
-    pendingNiriBatch_ = std::move(batch);
-    pendingRestoreId_ = restoreId;
-    niriRetryCount_ = 0;
-
-    niriPollTimer_ = instance_->eventLoop().addTimeEvent(
-        CLOCK_MONOTONIC,
-        fcitx::now(CLOCK_MONOTONIC) + kNiriRetryIntervalUsec, kNiriRetryIntervalUsec,
-        [this](fcitx::EventSourceTime *, uint64_t) -> bool {
-            return niriPollTick();
-        });
 }
 
 bool OutputHandler::niriPollTick() {
     niriRetryCount_++;
     auto cur = desktop_->getFocusedWindowId();
 
-    if (cur == capturedWinId_ || niriRetryCount_ >= kNiriRetryMax) {
-        if (cur != capturedWinId_) {
+    if (cur == pendingCapturedId_ || niriRetryCount_ >= kNiriRetryMax) {
+        if (cur != pendingCapturedId_) {
             fprintf(stderr, "Vinput [%s] focus switch timeout after %dms, committing anyway\n",
-                    desktop_->name(), niriRetryCount_ * 10);
+                    desktop_->name(),
+                    niriRetryCount_ * kNiriRetryIntervalUsec / 1000);
         }
 
-        commitBatch(pendingNiriBatch_, "commit");
+        commitPending(std::move(*pendingNiriCommit_), "commit");
+        pendingNiriCommit_.reset();
 
-        if (!pendingRestoreId_.empty() && pendingRestoreId_ != capturedWinId_) {
+        if (!pendingRestoreId_.empty() && pendingRestoreId_ != pendingCapturedId_) {
             desktop_->focusWindow(pendingRestoreId_);
         }
 
-        pendingNiriBatch_.clear();
+        pendingCapturedId_.clear();
+        pendingRestoreId_.clear();
+        wake();
         return false;
     }
 
     return true;
 }
 
-void OutputHandler::commitBatch(const std::vector<Pending> &batch, const char *label) {
-    auto tNow = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tNow - tPress_).count();
-    fprintf(stderr, "Vinput [timer] press→%s=%ldms\n", label, ms);
-    for (auto &p : batch) {
-        if (p.isStatus) continue;
-        auto *ic = instance_->mostRecentInputContext();
-        if (!ic) {
-            FCITX_INFO() << "Vinput [" << label << "] no focused ic, drop";
-            continue;
-        }
+void OutputHandler::commitPending(Pending pending, const char *label) {
+    auto *ic = instance_->inputContextManager().findByUUID(pending.targetUuid);
+    if (!ic) {
+        FCITX_INFO() << "Vinput [" << label << "] no focused ic, drop";
+    } else {
         FCITX_INFO() << "Vinput [" << label << "] ic=" << ic
                      << " program=" << ic->program()
-                     << " text=\"" << p.text << "\"";
-        if (!p.text.empty()) ic->commitString(p.text);
+                     << " text=\"" << pending.text << "\"";
+        if (!pending.text.empty()) ic->commitString(pending.text);
     }
+    if (pending.completion) pending.completion();
 }
 
 } // namespace vinput

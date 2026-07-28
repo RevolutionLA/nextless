@@ -14,7 +14,32 @@ test_config_fallback = executable('test_config_fallback',
   'test_config_fallback.cpp',
   dependencies: [asr_provider_dep])
 
+test_provider_lifetime = executable('test_provider_lifetime',
+  'test_provider_lifetime.cpp',
+  dependencies: [asr_provider_dep])
+
+test_curl_cancellation = executable('test_curl_cancellation',
+  'test_curl_cancellation.cpp',
+  dependencies: [asr_provider_dep])
+
+test_audio_capture_stop = executable('test_audio_capture_stop',
+  'test_audio_capture_stop.cpp',
+  dependencies: [asr_provider_dep])
+
+test_cloud_provider_queue = executable('test_cloud_provider_queue',
+  'test_cloud_provider_queue.cpp',
+  dependencies: [asr_provider_dep])
+
+test_niri_ipc = executable('test_niri_ipc',
+  'test_niri_ipc.cpp', '../adapter/src/desktop_strategy.cpp',
+  include_directories: include_directories('../adapter/src'))
+
 test('asr_registry', test_asr_registry)
 test('audio_capture_file', test_audio_capture_file)
 test('buffer_detect_cache', test_buffer_detect_cache)
 test('config_fallback', test_config_fallback)
+test('provider_lifetime', test_provider_lifetime)
+test('curl_cancellation', test_curl_cancellation)
+test('audio_capture_stop', test_audio_capture_stop)
+test('cloud_provider_queue', test_cloud_provider_queue)
+test('niri_ipc', test_niri_ipc)

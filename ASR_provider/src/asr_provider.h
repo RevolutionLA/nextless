@@ -1,14 +1,36 @@
 #pragma once
 
 #include <functional>
+#include <latch>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace vinput {
 
 using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
 using AsrErrorCallback = std::function<void(const std::string &error)>;
+
+inline void joinAsrWorker(std::thread &worker) {
+    if (!worker.joinable()) return;
+    if (worker.get_id() == std::this_thread::get_id()) {
+        worker.detach();
+    } else {
+        worker.join();
+    }
+}
+
+template<typename Task>
+inline void startAsrWorker(std::thread &worker, Task &&task) {
+    auto ready = std::make_shared<std::latch>(1);
+    worker = std::thread(
+        [ready, task = std::forward<Task>(task)]() mutable {
+            ready->wait();
+            task();
+        });
+    ready->count_down();
+}
 
 class IAsrProvider {
 public:
@@ -18,6 +40,8 @@ public:
 
     virtual void setConfig(const std::string &key, const std::string &value) { (void)key; (void)value; }
 
+    // Asynchronous providers invoke callbacks on their worker thread. Callbacks
+    // must hand UI work to the host event loop.
     void setResultCallback(AsrResultCallback cb) { onResult_ = std::move(cb); }
     void setErrorCallback(AsrErrorCallback cb) { onError_ = std::move(cb); }
 

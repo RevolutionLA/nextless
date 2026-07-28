@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <chrono>
 
 namespace vinput {
 
@@ -27,10 +28,20 @@ public:
 
 class NiriStrategy : public DesktopStrategy {
 public:
+    ~NiriStrategy() override;
     std::string getFocusedWindowId() override;
     void focusWindow(const std::string &id) override;
     bool supportsSwitching() const override { return true; }
     const char *name() const override { return "niri"; }
+
+private:
+    std::string request(const std::string &payload);
+    bool connectSocket(const std::string &path,
+                       std::chrono::steady_clock::time_point deadline);
+    void closeSocket();
+
+    int socketFd_ = -1;
+    std::string socketPath_;
 };
 
 class HyprlandStrategy : public DesktopStrategy {

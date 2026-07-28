@@ -1,5 +1,5 @@
 .\" Man page for fcitx5-vinput
-.TH vinput 1 "2026-06-04" "0.1.0" "fcitx5-vinput"
+.TH vinput 1 "2026-07-28" "0.1.0" "fcitx5-vinput"
 .SH NAME
 fcitx5\-vinput \- voice input addon for fcitx5
 .SH SYNOPSIS
@@ -12,10 +12,21 @@ recognized text to the active application.
 
 Hold \fBCapsLock\fP to start recording, release to stop and transcribe.
 The recognized text is committed at the cursor position.
+.PP
+The input panel shows \fBlistening\fP, \fBprocessing audio\fP, and
+\fBrecognizing\fP status. Network, service, timeout, microphone, and
+no-speech failures are shown in that panel and are never inserted into the
+application document.
 .SH USAGE
 .TP
 \fBCapsLock\fP (long-press, default 300ms)
 Start voice recording. Release to stop and transcribe.
+.PP
+Recording can start while an earlier cloud request is still recognizing.
+Vinput preserves recording and commit order and targets the input context that
+was active at the start of each recording. At most three recognitions,
+including the active one, are queued. A newer recording is discarded with an
+input-panel error when that limit is reached.
 .TP
 \fBCtrl+CapsLock\fP
 Enter provider/denoiser switching mode. While holding CapsLock:
@@ -72,6 +83,10 @@ All tuning parameters in one file. Sections:
 .IR zipformer ,
 .IR fire_red .
 See default values in the distributed example.
+.PP
+For Doubao, \fBpoll_interval_msec\fP is the normal result polling interval.
+The first query is sent after 300ms to improve short-utterance latency; later
+queries use the configured interval.
 .SS Audio
 .TP
 \fBaudio.json\fP
@@ -109,6 +124,15 @@ PulseAudio capture
   \(-> ASR recognition
 .fi
 .RE
+.PP
+PulseAudio capture is asynchronous. On CapsLock release, Vinput returns
+control to fcitx5 immediately, retains a short audio tail, then starts
+processing and recognition.
+.SH RELIABILITY
+Doubao and Qwen use persistent serialized workers, allowing curl connections
+to be reused while preserving result order. Zipformer and FireRed intentionally
+run one local process per utterance. On niri, focus capture and restoration use
+the compositor Unix socket; unsupported desktops fall back to direct commit.
 .SH FILES
 .TP
 .I ~/.config/vinput/

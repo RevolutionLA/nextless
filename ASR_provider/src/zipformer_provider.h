@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 #include <cstdint>
 #include "asr_provider.h"
@@ -10,17 +13,25 @@ namespace vinput {
 class ZipformerAsrProvider : public IAsrProvider {
 public:
     ZipformerAsrProvider();
+    ~ZipformerAsrProvider() override;
 
     void transcribe(std::vector<int16_t>, const std::string &wavPath) override;
     void setConfig(const std::string &key, const std::string &value) override;
 
 private:
-    void runTranscribe(const std::string &wav, const std::string &dir,
-                       AsrResultCallback onR, AsrErrorCallback onE);
+    static void runTranscribe(const std::string &wav, const std::string &dir,
+                              std::string sherpaBin, int numThreads,
+                              int timeoutSec,
+                              std::shared_ptr<std::atomic_bool> cancel,
+                              AsrResultCallback onR, AsrErrorCallback onE);
 
     std::string modelDir_;
     std::string sherpaBin_ = "~/.local/share/vinput/sherpa-onnx/bin/sherpa-onnx";
     int numThreads_ = 30;
+    int timeoutSec_ = 120;
+    std::shared_ptr<std::atomic_bool> cancel_ =
+        std::make_shared<std::atomic_bool>(false);
+    std::thread worker_;
 };
 
 class ZipformerAsrProviderFactory : public IAsrProviderFactory {

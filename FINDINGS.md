@@ -37,7 +37,6 @@
 - Hyprland 行为改为：长按 CapsLock 激活录音，第一次松开不停止录音；录音中再次按下 CapsLock 才停止录音，并调用 `onDeactivate(false)`，不再尝试恢复 CapsLock。
 
 #### 验证
-- GitNexus impact：`onKeyEvent` 风险 LOW，`onDeactivate` 风险 LOW；影响范围为 CapsLock 录音状态机。
 - `ninja -C build`：成功。
 - `meson test -C build`：4/4 通过。
 
@@ -58,10 +57,8 @@
 - 该尝试在 Hyprland 下仍不能可靠恢复实际 CapsLock lock state，最终采用上方“再按一次停止录音”的 Hyprland 专用交互调整。
 
 #### 验证
-- GitNexus impact：`revertCapsLock` 风险 LOW；直接调用者为 `onKeyEvent()` 和 `onDeactivate()`，影响 CapsLock 恢复流程。
 - `ninja -C build`：成功。
 - `meson test -C build`：4/4 通过。
-- `detect_changes(scope=all)`：变更符号为 `VinputAddon` 与 `VinputAddon::revertCapsLock()`；影响流程符合预期。
 
 ### 桌面环境自动检测（替代 output.json 配置）
 
@@ -756,6 +753,5 @@ OutputHandler 内部:
 - 更新 `ASR_provider/WhyThisArchWork.md` 与 `tests/README.md` 记录 per-device cache 边界和验证方式。
 
 #### 验证
-- GitNexus impact：`loadOrDetectBufferBytes` 风险 LOW，直接影响 `AudioCapture` 缓冲分配；`detectHardwareBurstBytes` 风险 LOW，通过 `loadOrDetectBufferBytes` 间接影响同一录音流程。
 - `ninja -C build`：成功。
 - `meson test -C build`：3/3 通过。

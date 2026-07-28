@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <pulse/pulseaudio.h>
 
 namespace vinput {
 
@@ -21,8 +22,10 @@ public:
 
     void start();
     void stop();
+    void wait();
 
     bool recording() const { return recordThread_.joinable() && !stopRequested_; }
+    bool finished() const { return finished_; }
 
     std::vector<int16_t> takeSamples();
     const std::string& wavPath() const { return wavPath_; }
@@ -38,6 +41,9 @@ public:
 
 private:
     void recordLoop();
+    static void contextStateCallback(pa_context *context, void *userdata);
+    static void streamStateCallback(pa_stream *stream, void *userdata);
+    static void streamReadCallback(pa_stream *stream, size_t bytes, void *userdata);
     static void applyDenoise(std::vector<int16_t> &samples, const std::string &method);
     static void dfDenoise(std::vector<int16_t> &samples);
     static double normalizeSamples(std::vector<int16_t> &samples);
@@ -46,10 +52,13 @@ private:
 
     std::thread recordThread_;
     std::atomic<bool> stopRequested_{false};
+    std::atomic<bool> finished_{true};
+    std::mutex pulseMutex_;
+    pa_mainloop *pulseMainloop_ = nullptr;
     std::mutex sampleMutex_;
     std::vector<int16_t> samples_;
     std::string wavPath_;
-    size_t bufferBytes_{0};
+    uint64_t captureId_ = 0;
     static double lufsTarget_;
     static int speexLevel_;
     static double crestThreshold_;

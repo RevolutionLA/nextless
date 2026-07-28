@@ -2,9 +2,13 @@
 #include "vinput_config.h"
 
 #include <unistd.h>
+#include <cerrno>
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <algorithm>
 #include <cstdio>
 #include <chrono>
 #include <thread>
@@ -28,9 +32,15 @@ ZipformerAsrProvider::ZipformerAsrProvider()
         auto d = jsonStr(adv, "model_dir");
         if (!d.empty()) modelDir_ = d;
         numThreads_ = jsonInt(adv, "num_threads", numThreads_);
+        timeoutSec_ = jsonInt(adv, "timeout_sec", timeoutSec_);
         auto b = jsonStr(adv, "bin_path");
         if (!b.empty()) sherpaBin_ = b;
     }
+}
+
+ZipformerAsrProvider::~ZipformerAsrProvider() {
+    cancel_->store(true);
+    joinAsrWorker(worker_);
 }
 
 void ZipformerAsrProvider::setConfig(const std::string &key,
@@ -41,15 +51,30 @@ void ZipformerAsrProvider::setConfig(const std::string &key,
 }
 
 void ZipformerAsrProvider::transcribe(std::vector<int16_t>, const std::string &wavPath) {
-    runTranscribe(wavPath, expandPath(modelDir_), onResult_, onError_);
+    cancel_->store(true);
+    joinAsrWorker(worker_);
+    cancel_ = std::make_shared<std::atomic_bool>(false);
+    startAsrWorker(
+        worker_,
+        [wavPath, modelDir = expandPath(modelDir_),
+         sherpaBin = expandPath(sherpaBin_), numThreads = numThreads_,
+         timeoutSec = timeoutSec_, cancel = cancel_, onR = onResult_,
+         onE = onError_]() mutable {
+            runTranscribe(wavPath, modelDir, std::move(sherpaBin), numThreads,
+                          timeoutSec, std::move(cancel), std::move(onR),
+                          std::move(onE));
+        });
 }
 
 void ZipformerAsrProvider::runTranscribe(const std::string &wav,
-                                          const std::string &dir,
-                                          AsrResultCallback onR,
-                                          AsrErrorCallback onE) {
-    std::thread([=, this]() {
-        auto t0 = std::chrono::steady_clock::now();
+                                         const std::string &dir,
+                                         std::string sherpaBin, int numThreads,
+                                         int timeoutSec,
+                                         std::shared_ptr<std::atomic_bool> cancel,
+                                         AsrResultCallback onR,
+                                         AsrErrorCallback onE) {
+    auto t0 = std::chrono::steady_clock::now();
+    struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } cleanup{wav};
 
         int pipefd[2];
         if (pipe2(pipefd, O_CLOEXEC) < 0) {
@@ -57,7 +82,6 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
             return;
         }
 
-        auto sherpaBin = expandPath(sherpaBin_);
         std::vector<std::string> args = {
             sherpaBin,
             "--encoder=" + dir + "/encoder-epoch-99-avg-1.onnx",
@@ -65,7 +89,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
             "--joiner="  + dir + "/joiner-epoch-99-avg-1.onnx",
             "--tokens="  + dir + "/tokens.txt",
             "--provider=cpu",
-            "--num-threads=" + std::to_string(numThreads_),
+            "--num-threads=" + std::to_string(numThreads),
             wav
         };
         std::vector<const char*> argv;
@@ -79,9 +103,15 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
         posix_spawn_file_actions_addclose(&actions, pipefd[1]);
 
+        posix_spawnattr_t attr;
+        posix_spawnattr_init(&attr);
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+        posix_spawnattr_setpgroup(&attr, 0);
+
         pid_t pid;
-        int ret = posix_spawn(&pid, sherpaBin.c_str(), &actions, nullptr,
+        int ret = posix_spawn(&pid, sherpaBin.c_str(), &actions, &attr,
                               (char *const *)argv.data(), ::environ);
+        posix_spawnattr_destroy(&attr);
         posix_spawn_file_actions_destroy(&actions);
         close(pipefd[1]);
 
@@ -91,16 +121,61 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
             return;
         }
 
+        int flags = fcntl(pipefd[0], F_GETFL, 0);
+        if (flags >= 0) fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
         std::string output;
         char buf[4096];
+        int status = 0;
+        bool reaped = false;
+        bool timedOut = false;
+        auto deadline = t0 + std::chrono::seconds(std::max(timeoutSec, 1));
+
+        while (!reaped) {
+            ssize_t n;
+            while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
+                output.append(buf, (size_t)n);
+            }
+
+            pid_t waitResult = waitpid(pid, &status, WNOHANG);
+            if (waitResult == pid) {
+                reaped = true;
+                break;
+            }
+            if (waitResult < 0 && errno != EINTR) break;
+
+            timedOut = std::chrono::steady_clock::now() >= deadline;
+            if (cancel->load() || timedOut) {
+                kill(-pid, SIGTERM);
+                for (int i = 0; i < 20; i++) {
+                    waitResult = waitpid(pid, &status, WNOHANG);
+                    if (waitResult == pid) {
+                        reaped = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                }
+                // The leader may exit while a descendant ignores SIGTERM.
+                kill(-pid, SIGKILL);
+                if (!reaped) {
+                    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+                }
+                close(pipefd[0]);
+                if (timedOut && onE) onE("Zipformer: recognition timed out");
+                return;
+            }
+
+            pollfd pfd = {pipefd[0], POLLIN, 0};
+            (void)poll(&pfd, 1, 100);
+        }
+
         ssize_t n;
         while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
             output.append(buf, (size_t)n);
         }
         close(pipefd[0]);
 
-        int status;
-        if (waitpid(pid, &status, 0) == -1) {
+        if (!reaped) {
             fprintf(stderr, "Vinput Zipformer: waitpid failed\n");
             unlink(wav.c_str());
             if (onE) onE("Zipformer: recognition failed");
@@ -134,7 +209,6 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         unlink(wav.c_str());
         if (onR && !text.empty()) onR(text, true);
         else if (onE) onE("Zipformer: empty result");
-    }).detach();
 }
 
 std::unique_ptr<IAsrProvider> ZipformerAsrProviderFactory::create() {

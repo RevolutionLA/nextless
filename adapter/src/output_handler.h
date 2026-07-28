@@ -4,15 +4,23 @@
 #include <fcitx/instance.h>
 #include <fcitx-utils/event.h>
 
-#include <chrono>
+#include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace vinput {
 
 class DesktopStrategy;
+
+struct OutputTarget {
+    fcitx::ICUUID uuid = {};
+    std::string windowId;
+    uint64_t statusSequence = 0;
+};
 
 class OutputHandler {
 public:
@@ -23,20 +31,15 @@ public:
     OutputHandler &operator=(const OutputHandler &) = delete;
 
     // Thread-safe: submit ASR result text for display
-    void submit(const std::string &text);
+    void submit(const OutputTarget &target, const std::string &text,
+                std::function<void()> onCommitted = {});
 
     // Thread-safe: show transient status text
-    void showStatus(const std::string &text);
+    void showStatus(const OutputTarget &target, const std::string &text,
+                    std::function<void()> onShown = {});
 
     // Capture current focused window via desktop strategy
-    void captureCurrentWindow();
-
-    // niri window focus
-    void setCaptureWindow(const std::string &winId);
-    void clearCaptureWindow();
-
-    // Timing reference for diagnostics
-    void setPressTime(std::chrono::steady_clock::time_point t);
+    OutputTarget captureCurrentWindow();
 
 private:
     fcitx::Instance *instance_;
@@ -47,26 +50,35 @@ private:
     struct Pending {
         std::string text;
         bool isStatus = false;
+        fcitx::ICUUID targetUuid = {};
+        std::string capturedWinId;
+        uint64_t statusSequence = 0;
+        std::function<void()> completion;
     };
     std::mutex pendingMutex_;
     std::vector<Pending> pending_;
 
     std::unique_ptr<DesktopStrategy> desktop_;
-    std::string capturedWinId_;
-    std::chrono::steady_clock::time_point tPress_;
+    uint64_t latestStatusSequence_ = 0;
 
-    // niri async focus polling
-    std::vector<Pending> pendingNiriBatch_;
+    // Focus-switch commits are serialized so results for different windows
+    // cannot overwrite one another while a switch is in progress.
+    std::deque<Pending> commitQueue_;
+    std::optional<Pending> pendingNiriCommit_;
+    std::string pendingCapturedId_;
     std::string pendingRestoreId_;
     int niriRetryCount_ = 0;
     std::unique_ptr<fcitx::EventSourceTime> niriPollTimer_;
 
-    static constexpr int kNiriRetryMax = 50;
-    static constexpr int kNiriRetryIntervalUsec = 10000;
+    static constexpr int kNiriRetryMax = 20;
+    static constexpr int kNiriRetryIntervalUsec = 25000;
 
-    void enqueue(const std::string &text, bool isStatus);
+    void enqueue(const OutputTarget &target, const std::string &text,
+                 bool isStatus, std::function<void()> completion);
     void drainAndCommit();
-    void commitBatch(const std::vector<Pending> &batch, const char *label);
+    void dispatchNextCommit();
+    void commitPending(Pending pending, const char *label);
+    void wake();
     bool niriPollTick();
 };
 

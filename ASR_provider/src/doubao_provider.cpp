@@ -15,6 +15,16 @@
 
 namespace vinput {
 
+static bool waitCancelable(const std::shared_ptr<std::atomic_bool> &cancel,
+                           int milliseconds) {
+    for (int waited = 0; waited < milliseconds; waited += 50) {
+        if (cancel->load()) return false;
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(std::min(50, milliseconds - waited)));
+    }
+    return !cancel->load();
+}
+
 static std::string base64Encode(const uint8_t *data, size_t len) {
     static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -118,6 +128,20 @@ DoubaoAsrProvider::DoubaoAsrProvider() {
         submitTimeout_ = (long)jsonInt(adv, "submit_timeout_sec", (int)submitTimeout_);
         queryTimeout_ = (long)jsonInt(adv, "query_timeout_sec", (int)queryTimeout_);
     }
+    state_ = std::make_shared<WorkerState>();
+    worker_ = std::thread([state = state_] { workerLoop(state); });
+}
+
+DoubaoAsrProvider::~DoubaoAsrProvider() {
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        state_->stopping = true;
+        if (state_->activeCancel) state_->activeCancel->store(true);
+        for (const auto &task : state_->tasks) unlink(task.wavPath.c_str());
+        state_->tasks.clear();
+    }
+    state_->ready.notify_one();
+    joinAsrWorker(worker_);
 }
 
 void DoubaoAsrProvider::setConfig(const std::string &key, const std::string &value) {
@@ -126,27 +150,66 @@ void DoubaoAsrProvider::setConfig(const std::string &key, const std::string &val
 }
 
 void DoubaoAsrProvider::transcribe(std::vector<int16_t> samples, const std::string &wavPath) {
-    processRecording(std::move(samples), wavPath, onResult_, onError_);
+    Task task{std::move(samples), wavPath, apiKey_, resourceId_,
+              pollIntervalMsec_, maxPolls_, submitTimeout_, queryTimeout_,
+              std::make_shared<std::atomic_bool>(false), onResult_, onError_};
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (state_->stopping) {
+            unlink(wavPath.c_str());
+            return;
+        }
+        state_->tasks.push_back(std::move(task));
+    }
+    state_->ready.notify_one();
+}
+
+void DoubaoAsrProvider::workerLoop(const std::shared_ptr<WorkerState> &state) {
+    while (true) {
+        Task task;
+        {
+            std::unique_lock<std::mutex> lock(state->mutex);
+            state->ready.wait(lock, [&] {
+                return state->stopping || !state->tasks.empty();
+            });
+            if (state->stopping) return;
+            task = std::move(state->tasks.front());
+            state->tasks.pop_front();
+            state->activeCancel = task.cancel;
+        }
+        processRecording(std::move(task.samples), task.wavPath,
+                         std::move(task.apiKey), std::move(task.resourceId),
+                         task.pollIntervalMsec, task.maxPolls,
+                         task.submitTimeout, task.queryTimeout,
+                         std::move(task.cancel), std::move(task.onResult),
+                         std::move(task.onError));
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->activeCancel.reset();
+            if (state->stopping) return;
+        }
+    }
 }
 
 void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
-                                           const std::string &wavPath,
-                                           AsrResultCallback onR,
-                                           AsrErrorCallback onE) {
+                                          const std::string &wavPath,
+                                          std::string apiKey,
+                                          std::string resourceId,
+                                          int pollIntervalMsec, int maxPolls,
+                                          long submitTimeout, long queryTimeout,
+                                          std::shared_ptr<std::atomic_bool> cancel,
+                                          AsrResultCallback onR,
+                                          AsrErrorCallback onE) {
     fprintf(stderr, "Vinput Doubao: recorded %zu samples to %s\n",
             samples.size(), wavPath.c_str());
+    struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } _wav{wavPath};
 
-    auto apiKey = apiKey_;
-    auto resourceId = resourceId_;
     if (apiKey.empty() || resourceId.empty()) {
         if (onE) onE("Doubao: missing api_key or resource_id in ~/.config/vinput/doubao.json");
         return;
     }
 
-    std::thread([=, this]() {
-        auto t0 = std::chrono::steady_clock::now();
-        struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } _wav{wavPath};
-
+    auto t0 = std::chrono::steady_clock::now();
         std::ifstream wf(wavPath, std::ios::binary);
         if (!wf) {
             if (onE) onE("Doubao: failed to read WAV");
@@ -169,9 +232,6 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                 if (onE) onE("Doubao: curl init failed");
                 return;
             }
-            curl_easy_reset(curl);
-            std::string respBody, respHdr;
-
             std::string submitBody =
                 "{"
                 "\"audio\":{"
@@ -185,6 +245,8 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                 "}"
                 "}";
 
+            curl_easy_reset(curl);
+            std::string respBody, respHdr;
             struct curl_slist *headers = nullptr;
             headers = curl_slist_append(headers, "Content-Type: application/json");
             headers = curl_slist_append(headers,
@@ -203,7 +265,11 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &respBody);
             curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCb);
             curl_easy_setopt(curl, CURLOPT_HEADERDATA, &respHdr);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, submitTimeout_);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT,
+                             std::min(submitTimeout, 10L));
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, submitTimeout);
+            curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+            CurlCancellationScope cancellation(curl, cancel);
 
             CURLcode res = curl_easy_perform(curl);
             long httpCode = 0;
@@ -211,9 +277,26 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             curl_slist_free_all(headers);
 
             fprintf(stderr, "Vinput Doubao: submit HTTP %ld\n", httpCode);
-            if (res != CURLE_OK || httpCode != 200) {
-                fprintf(stderr, "Vinput Doubao: submit failed, body=%s\n", respBody.c_str());
-                if (onE) onE("Doubao: submit failed (HTTP " + std::to_string(httpCode) + ")");
+            if (res != CURLE_OK) {
+                if (cancel->load()) return;
+                fprintf(stderr, "Vinput Doubao: submit failed, curl=%d (%s), body=%s\n",
+                        (int)res, curl_easy_strerror(res), respBody.c_str());
+                if (onE) {
+                    onE("Doubao: network request failed (" +
+                        std::string(curl_easy_strerror(res)) + ")");
+                }
+                return;
+            }
+            if (httpCode != 200) {
+                if (onE) {
+                    if (httpCode == 429 || httpCode >= 500) {
+                        onE("Doubao: service unavailable (HTTP " +
+                            std::to_string(httpCode) + ")");
+                    } else {
+                        onE("Doubao: service request failed (HTTP " +
+                            std::to_string(httpCode) + ")");
+                    }
+                }
                 return;
             }
 
@@ -227,8 +310,16 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
 
         auto tSubmit = std::chrono::steady_clock::now();
 
-        for (int pollCount = 1; pollCount <= maxPolls_; pollCount++) {
-            usleep(pollIntervalMsec_ * 1000);
+        int consecutiveNetworkErrors = 0;
+        CURLcode lastQueryError = CURLE_OK;
+        long lastQueryHttpCode = 0;
+        for (int pollCount = 1; pollCount <= maxPolls; pollCount++) {
+            int pollDelay = pollIntervalMsec;
+            if (pollIntervalMsec > 300) {
+                if (pollCount == 1) pollDelay = 300;
+                else if (pollCount == 2) pollDelay = pollIntervalMsec - 300;
+            }
+            if (!waitCancelable(cancel, pollDelay)) return;
 
             CURL *curl = getCurl();
             if (!curl) {
@@ -255,18 +346,49 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &respBody);
             curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCb);
             curl_easy_setopt(curl, CURLOPT_HEADERDATA, &respHdr);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, queryTimeout_);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT,
+                             std::min(queryTimeout, 10L));
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, queryTimeout);
+            curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+            CurlCancellationScope cancellation(curl, cancel);
 
             CURLcode res = curl_easy_perform(curl);
             long httpCode = 0;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
             curl_slist_free_all(headers);
 
-            if (res != CURLE_OK || httpCode != 200) {
-                fprintf(stderr, "Vinput Doubao: query #%d HTTP %ld error, retry\n",
-                        pollCount, httpCode);
+            if (cancel->load()) return;
+
+            bool retryableHttp = httpCode == 429 || httpCode >= 500;
+            if (res != CURLE_OK || retryableHttp) {
+                lastQueryError = res;
+                lastQueryHttpCode = httpCode;
+                consecutiveNetworkErrors++;
+                fprintf(stderr,
+                        "Vinput Doubao: query #%d HTTP %ld curl=%d (%s), retry %d/3\n",
+                        pollCount, httpCode, (int)res, curl_easy_strerror(res),
+                        consecutiveNetworkErrors);
+                if (consecutiveNetworkErrors >= 3) {
+                    if (onE) {
+                        if (lastQueryError != CURLE_OK) {
+                            onE("Doubao: network query failed (" +
+                                std::string(curl_easy_strerror(lastQueryError)) +
+                                ")");
+                        } else {
+                            onE("Doubao: service unavailable (HTTP " +
+                                std::to_string(lastQueryHttpCode) + ")");
+                        }
+                    }
+                    return;
+                }
                 continue;
             }
+            if (httpCode != 200) {
+                if (onE) onE("Doubao: service query failed (HTTP " +
+                             std::to_string(httpCode) + ")");
+                return;
+            }
+            consecutiveNetworkErrors = 0;
 
             std::string statusCode = getHeader(respHdr, "x-api-status-code");
 
@@ -288,7 +410,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tSubmit - tEncode).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tSubmit).count(),
                         pollCount);
-                if (onR) onR("", true);
+                if (onE) onE("Doubao: no speech recognized");
                 return;
             }
             if (statusCode != "20000001" && statusCode != "20000002") {
@@ -301,8 +423,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
         }
 
         fprintf(stderr, "Vinput Doubao: query timeout\n");
-        if (onE) onE("Doubao: query timeout (60s)");
-    }).detach();
+        if (onE) onE("Doubao: recognition timed out");
 }
 
 std::unique_ptr<IAsrProvider> DoubaoAsrProviderFactory::create() {
