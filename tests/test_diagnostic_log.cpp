@@ -1,4 +1,5 @@
 #include "diagnostic_log.h"
+#include "sha256.h"
 
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,21 @@ bool contains(const std::string &text, const std::string &needle) {
 } // namespace
 
 int main() {
+    if (vinput::sha256::hashHex("") !=
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") {
+        std::cerr << "SHA-256 empty-string vector mismatch\n";
+        return 1;
+    }
+    if (vinput::sha256::hashHex("abc") !=
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
+        std::cerr << "SHA-256 abc vector mismatch\n";
+        return 1;
+    }
+    if (vinput::sha256::hashHex("The quick brown fox jumps over the lazy dog") !=
+        "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592") {
+        std::cerr << "SHA-256 fox vector mismatch\n";
+        return 1;
+    }
     if (vinput::hashDiagnosticValue("diagnostic-secret") !=
         "de5a55536fc8350ce2c60389ad2ae99807bc8ecdbf940c05816e9b72ca14c9bf") {
         std::cerr << "SHA-256 diagnostic hash mismatch\n";

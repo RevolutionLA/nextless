@@ -184,7 +184,6 @@ the default unless the API's QPS limit requires a slower cadence.
 | libcurl | `curl` |
 | speexdsp | `speexdsp` |
 | libsoxr | `libsoxr` |
-| OpenSSL | `openssl` |
 
 ## Audio Pipeline
 

@@ -1,6 +1,5 @@
 #include "diagnostic_log.h"
-
-#include <openssl/evp.h>
+#include "sha256.h"
 
 #include <chrono>
 #include <algorithm>
@@ -101,18 +100,7 @@ uint64_t existingSize(const std::string &path) {
 } // namespace
 
 std::string hashDiagnosticValue(std::string_view value) {
-    unsigned char digest[EVP_MAX_MD_SIZE] = {};
-    unsigned int digestLength = 0;
-    if (EVP_Digest(value.data(), value.size(), digest, &digestLength,
-                   EVP_sha256(), nullptr) != 1) {
-        return "hash-error";
-    }
-
-    std::ostringstream out;
-    out << std::hex << std::setfill('0');
-    for (unsigned int i = 0; i < digestLength; ++i)
-        out << std::setw(2) << static_cast<unsigned int>(digest[i]);
-    return out.str();
+    return sha256::hashHex(value);
 }
 
 FileDiagnosticLog::FileDiagnosticLog(std::string path, uint64_t maxBytes)

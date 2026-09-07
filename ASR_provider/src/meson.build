@@ -4,7 +4,6 @@ asr_ebur128 = dependency('libebur128')
 asr_libcurl = dependency('libcurl')
 asr_soxr = dependency('soxr')
 asr_speexdsp = dependency('speexdsp')
-asr_openssl = dependency('openssl')
 
 asr_provider_lib = static_library('asr_provider',
   'asr_provider.h',
@@ -24,12 +23,13 @@ asr_provider_lib = static_library('asr_provider',
   'qwen_provider.h',
   'qwen_provider.cpp',
   'vinput_config.h',
+  'sha256.h',
   'diagnostic_log.h',
   'diagnostic_log.cpp',
-  dependencies: [asr_pulse_simple, asr_pulse, asr_ebur128, asr_libcurl, asr_soxr, asr_speexdsp, asr_openssl],
+  dependencies: [asr_pulse_simple, asr_pulse, asr_ebur128, asr_libcurl, asr_soxr, asr_speexdsp],
   install: false)
 
 asr_provider_dep = declare_dependency(
   include_directories: include_directories('.'),
   link_whole: asr_provider_lib,
-  dependencies: [asr_pulse_simple, asr_pulse, asr_ebur128, asr_libcurl, asr_soxr, asr_speexdsp, asr_openssl])
+  dependencies: [asr_pulse_simple, asr_pulse, asr_ebur128, asr_libcurl, asr_soxr, asr_speexdsp])
