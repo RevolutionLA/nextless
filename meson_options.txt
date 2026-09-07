@@ -1,0 +1,4 @@
+option('diagnostic_logging',
+  type: 'boolean',
+  value: false,
+  description: 'Enable bounded developer diagnostic logging')

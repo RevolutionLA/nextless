@@ -30,9 +30,9 @@ test_cloud_provider_queue = executable('test_cloud_provider_queue',
   'test_cloud_provider_queue.cpp',
   dependencies: [asr_provider_dep])
 
-test_niri_ipc = executable('test_niri_ipc',
-  'test_niri_ipc.cpp', '../adapter/src/desktop_strategy.cpp',
-  include_directories: include_directories('../adapter/src'))
+test_diagnostic_log = executable('test_diagnostic_log',
+  'test_diagnostic_log.cpp',
+  dependencies: [asr_provider_dep])
 
 test('asr_registry', test_asr_registry)
 test('audio_capture_file', test_audio_capture_file)
@@ -42,4 +42,4 @@ test('provider_lifetime', test_provider_lifetime)
 test('curl_cancellation', test_curl_cancellation)
 test('audio_capture_stop', test_audio_capture_stop)
 test('cloud_provider_queue', test_cloud_provider_queue)
-test('niri_ipc', test_niri_ipc)
+test('diagnostic_log', test_diagnostic_log)

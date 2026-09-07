@@ -184,6 +184,7 @@ the default unless the API's QPS limit requires a slower cadence.
 | libcurl | `curl` |
 | speexdsp | `speexdsp` |
 | libsoxr | `libsoxr` |
+| OpenSSL | `openssl` |
 
 ## Audio Pipeline
 
@@ -201,9 +202,32 @@ processing, avoiding both input-method stalls and clipped final syllables.
   connection state across requests while preserving result order.
 - Local Zipformer and FireRed runs remain one process per utterance. This is
   intentional; no long-running local model server is required.
-- On niri, Vinput uses the compositor's Unix IPC socket for focus capture and
-  result restoration. Other desktops fall back to their configured strategy
-  or direct commit.
+
+## Developer Diagnostics
+
+The developer build records one JSON object per line to
+`~/.local/share/vinput/diagnostic.log`. It is disabled by default and can be
+enabled with the Meson option below:
+
+```bash
+meson setup build-diagnostic . --wipe -Ddiagnostic_logging=true
+meson compile -C build-diagnostic
+sudo meson install -C build-diagnostic
+fcitx5 -r
+```
+
+The optional `VINPUT_DIAGNOSTIC_LOG` environment variable overrides the log
+path. The file is never rotated and stops accepting new events at 1 GiB. The
+log contains no audio, API keys, or recognition text. Text and sensitive
+identifiers are represented by length and truncated SHA-256 values.
+
+After a reproduction, restart fcitx5 before collecting the file so the old
+process flushes its final events:
+
+```bash
+fcitx5 -r
+cp ~/.local/share/vinput/diagnostic.log /tmp/vinput-diagnostic.log
+```
 
 ## License
 
