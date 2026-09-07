@@ -8,9 +8,9 @@ It is not responsible for ASR API protocols, audio denoise algorithms, hardware 
 
 ## Dependencies
 
-This module may depend on fcitx5, fcitx5 notifications, Linux uinput, `ASR_provider` public interfaces, and compositor strategy implementations through `DesktopStrategy`.
+This module may depend on fcitx5, fcitx5 notifications, Linux uinput, and `ASR_provider` public interfaces.
 
-It must not require providers to know about fcitx5 input contexts or desktop focus state.
+It must not require providers to know about fcitx5 input contexts or focus state.
 
 ## Data Flow
 
@@ -21,15 +21,14 @@ fcitx5 KeyEvent
   -> IAsrProvider::transcribe(samples, wavPath)
   -> provider callback
   -> OutputHandler::submit(text)
-  -> DesktopStrategy optional focus switch
   -> InputContext::commitString(text)
 ```
 
 ## Why It Works
 
-The addon keeps user interaction state in one place while delegating replaceable concerns to smaller modules. `AudioCapture` owns recording. `IAsrProvider` owns recognition. `OutputHandler` owns thread-safe result delivery and commit. `DesktopStrategy` isolates compositor-specific focus behavior.
+The addon keeps user interaction state in one place while delegating replaceable concerns to smaller modules. `AudioCapture` owns recording. `IAsrProvider` owns recognition. `OutputHandler` owns thread-safe result delivery and commit.
 
-This prevents ASR providers from depending on fcitx5 and prevents desktop focus code from leaking into the key-event lifecycle. Unsupported desktops degrade to `NoopStrategy`, which preserves direct commit behavior.
+This prevents ASR providers from depending on fcitx5 and keeps result delivery isolated to the fcitx event loop.
 
 ## Failure Modes
 
@@ -37,16 +36,16 @@ This prevents ASR providers from depending on fcitx5 and prevents desktop focus 
 - No input context can exist at activation time, so activation exits early.
 - No ASR provider can be registered, so activation exits without recording.
 - Provider creation can fail, so capture is not started.
-- Desktop focus capture or focus restore can fail, so `OutputHandler` commits directly or after timeout.
+- The captured input context can disappear before commit, so `OutputHandler` logs the missing context and drops the result.
 
 ## Replacement Cost
 
-The adapter can replace an ASR provider without changing key handling if the provider preserves `IAsrProvider`. Desktop support can be replaced by adding or changing a `DesktopStrategy`. Output commit behavior can be changed inside `OutputHandler` without modifying provider implementations.
+The adapter can replace an ASR provider without changing key handling if the provider preserves `IAsrProvider`. Output commit behavior can be changed inside `OutputHandler` without modifying provider implementations.
 
 ## Verification
 
 - `meson test -C build` verifies provider registry linkage used by the adapter.
-- `ninja -C build` verifies the fcitx5 addon links with ASR and desktop strategy modules.
+- `ninja -C build` verifies the fcitx5 addon links with ASR modules.
 - Manual integration requires `sudo meson install -C build`, `fcitx5 -r`, and CapsLock testing in a real session.
 
 ## Independent Review

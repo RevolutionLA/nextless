@@ -32,6 +32,7 @@
 #include <deque>
 #include <fstream>
 #include <optional>
+#include <string_view>
 
 // Vinput ASR provider 接口
 #include "asr_provider.h"
@@ -39,6 +40,7 @@
 #include "doubao_provider.h"      // 确保豆包后端被链接并自动注册
 #include "qwen_provider.h"        // 确保千问后端被链接并自动注册
 #include "audio_capture.h"
+#include "diagnostic_log.h"
 #include "output_handler.h"
 #include "vinput_config.h"
 
@@ -51,6 +53,12 @@ static std::string expandPath(const std::string &p) {
         if (h) return std::string(h) + p.substr(1);
     }
     return p;
+}
+
+static std::atomic<uint64_t> nextRecognitionId{1};
+
+static std::string diagnosticHash(std::string_view value) {
+    return vinput::hashDiagnosticValue(value).substr(0, 16);
 }
 
 // 配置: 定义 addon 的可配置选项
@@ -88,6 +96,9 @@ public:
         }
 
         FCITX_INFO() << "Vinput addon loaded";
+        vinput::diagnosticLog().event("adapter", "addon_loaded", {
+            {"diagnostics", VINPUT_DIAGNOSTICS_ENABLED ? "enabled" : "disabled"}
+        });
 
         // 创建常驻 uinput 虚键盘, 用于还原 CapsLock
         initUinput();
@@ -105,6 +116,7 @@ public:
     }
 
     ~VinputAddon() override {
+        vinput::diagnosticLog().event("adapter", "addon_shutdown_begin");
         {
             std::lock_guard<std::mutex> lock(callbackGate_->mutex);
             callbackGate_->owner = nullptr;
@@ -125,6 +137,7 @@ public:
             ioctl(uinputFd_, UI_DEV_DESTROY);
             close(uinputFd_);
         }
+        vinput::diagnosticLog().event("adapter", "addon_shutdown_end");
     }
 
     // 配置读写
@@ -144,10 +157,6 @@ private:
     uint64_t activationUsec_ = 300 * 1000;  // from vinput.json: activation_msec
     int notificationTimeout_ = 2000;         // from vinput.json: notification_timeout
     int debounceCount_ = 2;                   // from vinput.json: debounce_count
-
-    static bool isHyprlandSession() {
-        return getenv("HYPRLAND_INSTANCE_SIGNATURE") != nullptr;
-    }
 
     // 创建常驻 uinput 虚拟键盘设备, 用于还原 CapsLock
     void initUinput() {
@@ -201,7 +210,7 @@ private:
     int uinputFd_ = -1;
     int revertDebounce_ = 0;            // uinput CapsLock 反弹去抖计数
 
-    // Output: encapsulates self-pipe, commit, niri focus switching
+    // Output: encapsulates self-pipe and commit
     std::unique_ptr<vinput::OutputHandler> outputHandler_;
 
     // 运行时依赖: notifications addon (仅用于切换显示)
@@ -246,6 +255,7 @@ private:
     std::string lastPreeditText_;       // deactivate 时 commit 用
     int providerIndex_ = 0;
     int denoiserIndex_ = 0;
+    uint64_t currentRecognitionId_ = 0;
 
     struct RecognitionRequest {
         std::vector<int16_t> samples;
@@ -253,6 +263,7 @@ private:
         std::string providerId;
         vinput::OutputTarget target;
         std::chrono::steady_clock::time_point pressTime;
+        uint64_t recognitionId = 0;
     };
     static constexpr size_t kMaxPendingRecognitions = 3;
     std::deque<RecognitionRequest> recognitionQueue_;
@@ -342,14 +353,19 @@ private:
 
         if (keyEvent.isRelease()) {
             if (capsLock) {
+                vinput::diagnosticLog().event("input", "capslock_release", {
+                    {"recognition_id", std::to_string(currentRecognitionId_)},
+                    {"active", active_ ? "true" : "false"},
+                    {"switch_active", switchActive_ ? "true" : "false"},
+                    {"timer", timer_ ? "true" : "false"},
+                    {"revert_debounce", std::to_string(revertDebounce_)}
+                });
                 if (revertDebounce_ > 0) {
                     revertDebounce_--;
                     return;
                 }
                 if (active_) {
-                    if (!isHyprlandSession()) {
-                        onDeactivate();
-                    }
+                    onDeactivate();
                 } else if (switchActive_) {
                     switchActive_ = false;
                     revertDebounce_ = debounceCount_;
@@ -365,13 +381,15 @@ private:
 
         // ---- 按下事件 ----
         if (capsLock) {
+            vinput::diagnosticLog().event("input", "capslock_press", {
+                {"recognition_id", std::to_string(currentRecognitionId_)},
+                {"active", active_ ? "true" : "false"},
+                {"switch_active", switchActive_ ? "true" : "false"},
+                {"timer", timer_ ? "true" : "false"},
+                {"revert_debounce", std::to_string(revertDebounce_)}
+            });
             if (revertDebounce_ > 0) {
                 revertDebounce_--;
-                return;
-            }
-            if (active_ && isHyprlandSession()) {
-                onDeactivate(false);
-                keyEvent.filterAndAccept();
                 return;
             }
             if (timer_ || active_ || switchActive_) return;
@@ -447,6 +465,8 @@ private:
         tActivate_ = std::chrono::steady_clock::now();
         auto pressMs = std::chrono::duration_cast<std::chrono::milliseconds>(tActivate_ - tPress_).count();
         FCITX_INFO() << "Vinput activated (press→activate=" << pressMs << "ms)";
+        const auto recognitionId = nextRecognitionId.fetch_add(1);
+        currentRecognitionId_ = recognitionId;
 
         // 重新捕获当前焦点窗口 (比 KeyEvent::inputContext 更可靠)
         auto *ic = instance_->mostRecentInputContext();
@@ -457,16 +477,24 @@ private:
                          << " program=" << ic->program()
                          << " frontend=" << ic->frontendName();
         } else {
+            vinput::diagnosticLog().event("adapter", "activation_no_input_context", {
+                {"recognition_id", std::to_string(recognitionId)}
+            });
             FCITX_INFO() << "Vinput [activate] no input context";
             return;
         }
 
         // 捕获当前焦点窗口 (通过 OutputHandler 的桌面策略)
         if (outputHandler_) {
-            currentTarget_ = outputHandler_->captureCurrentWindow();
+            currentTarget_ = outputHandler_->captureCurrentUuid(recognitionId);
             outputHandler_->showStatus(currentTarget_, "Vinput: listening...");
         }
         FCITX_INFO() << "Vinput [activate] captured window";
+        vinput::diagnosticLog().event("adapter", "recognition_activated", {
+            {"recognition_id", std::to_string(recognitionId)},
+            {"provider_config", config_.defaultProvider.value()},
+            {"press_to_activate_ms", std::to_string(pressMs)}
+        });
 
         auto list = vinput::AsrProviderRegistry::instance().listFactories();
         if (list.empty()) {
@@ -490,6 +518,7 @@ private:
         auto callbackGate = callbackGate_;
 
         audioCapture_ = std::make_unique<vinput::AudioCapture>();
+        audioCapture_->setDiagnosticId(recognitionId);
         {
             // 从 audio.json 读取初始降噪方法，设置到 AudioCapture
             const char *home = getenv("HOME");
@@ -517,17 +546,27 @@ private:
                 }
             }
         }
-        audioCapture_->setRecordedCallback([callbackGate, providerId, target, pressTime](
+        audioCapture_->setRecordedCallback([callbackGate, providerId, target, pressTime,
+                                             recognitionId](
                                                const std::vector<int16_t> &samples,
                                                const std::string &wav) {
             std::lock_guard<std::mutex> lock(callbackGate->mutex);
             auto *owner = callbackGate->owner;
             if (!owner) {
+                vinput::diagnosticLog().event("adapter", "capture_callback_after_shutdown", {
+                    {"recognition_id", std::to_string(recognitionId)},
+                    {"wav_hash", diagnosticHash(wav)}
+                });
                 unlink(wav.c_str());
                 return;
             }
+            vinput::diagnosticLog().event("adapter", "capture_recorded_callback", {
+                {"recognition_id", std::to_string(recognitionId)},
+                {"sample_count", std::to_string(samples.size())},
+                {"wav_hash", diagnosticHash(wav)}
+            });
             auto request = std::make_shared<RecognitionRequest>(RecognitionRequest{
-                samples, wav, providerId, target, pressTime});
+                samples, wav, providerId, target, pressTime, recognitionId});
             owner->outputHandler_->showStatus(
                 target, "Vinput: recognizing...",
                 [callbackGate, request = std::move(request)] {
@@ -539,7 +578,12 @@ private:
         audioCapture_->setStateCallback([](bool active) {
             FCITX_INFO() << "Vinput ASR state: " << (active ? "on" : "off");
         });
-        audioCapture_->setStatusTextCallback([callbackGate, target](const std::string &text) {
+        audioCapture_->setStatusTextCallback([callbackGate, target, recognitionId](const std::string &text) {
+            vinput::diagnosticLog().event("adapter", "capture_status", {
+                {"recognition_id", std::to_string(recognitionId)},
+                {"status_hash", diagnosticHash(text)},
+                {"status_length", std::to_string(text.size())}
+            });
             withOwner(callbackGate, [&](VinputAddon &owner) {
                 owner.outputHandler_->showStatus(target, text);
             });
@@ -550,23 +594,51 @@ private:
     }
 
     void enqueueRecognition(RecognitionRequest request) {
+        vinput::diagnosticLog().event("adapter", "recognition_enqueue_attempt", {
+            {"recognition_id", std::to_string(request.recognitionId)},
+            {"provider", request.providerId},
+            {"queue_size", std::to_string(recognitionQueue_.size())},
+            {"active_id", activeRecognition_ ?
+                std::to_string(activeRecognition_->recognitionId) : "0"}
+        });
         if (shuttingDown_) {
+            vinput::diagnosticLog().event("adapter", "recognition_dropped_shutdown", {
+                {"recognition_id", std::to_string(request.recognitionId)}
+            });
             unlink(request.wavPath.c_str());
             return;
         }
         if (recognitionQueue_.size() + (activeRecognition_ ? 1 : 0) >=
             kMaxPendingRecognitions) {
             unlink(request.wavPath.c_str());
+            vinput::diagnosticLog().event("adapter", "recognition_dropped_queue_full", {
+                {"recognition_id", std::to_string(request.recognitionId)},
+                {"queue_size", std::to_string(recognitionQueue_.size())},
+                {"active_id", activeRecognition_ ?
+                    std::to_string(activeRecognition_->recognitionId) : "0"}
+            });
             outputHandler_->showStatus(request.target,
                                        "Vinput: recognition queue full; try again");
             return;
         }
         recognitionQueue_.push_back(std::move(request));
+        vinput::diagnosticLog().event("adapter", "recognition_enqueued", {
+            {"recognition_id", std::to_string(recognitionQueue_.back().recognitionId)},
+            {"queue_size", std::to_string(recognitionQueue_.size())}
+        });
         dispatchNextRecognition();
     }
 
     bool ensureAsrProvider(const std::string &providerId) {
         if (asr_ && asrProviderId_ == providerId) return true;
+        if (asr_) {
+            vinput::diagnosticLog().event("adapter", "provider_replaced", {
+                {"old_provider", asrProviderId_},
+                {"new_provider", providerId},
+                {"recognition_id", activeRecognition_ ?
+                    std::to_string(activeRecognition_->recognitionId) : "0"}
+            });
+        }
         asr_.reset();
         asr_ = vinput::AsrProviderRegistry::instance().create(providerId);
         asrProviderId_ = asr_ ? providerId : std::string{};
@@ -574,14 +646,33 @@ private:
     }
 
     void dispatchNextRecognition() {
-        if (activeRecognition_ || recognitionQueue_.empty() || shuttingDown_) return;
+        if (activeRecognition_ || recognitionQueue_.empty() || shuttingDown_) {
+            vinput::diagnosticLog().event("adapter", "recognition_dispatch_blocked", {
+                {"reason", activeRecognition_ ? "active" :
+                           (recognitionQueue_.empty() ? "empty" : "shutting_down")},
+                {"active_id", activeRecognition_ ?
+                    std::to_string(activeRecognition_->recognitionId) : "0"},
+                {"queue_size", std::to_string(recognitionQueue_.size())}
+            });
+            return;
+        }
         activeRecognition_ = std::move(recognitionQueue_.front());
         recognitionQueue_.pop_front();
+        vinput::diagnosticLog().event("adapter", "recognition_dispatch_begin", {
+            {"recognition_id", std::to_string(activeRecognition_->recognitionId)},
+            {"provider", activeRecognition_->providerId},
+            {"wav_hash", diagnosticHash(activeRecognition_->wavPath)},
+            {"queue_size", std::to_string(recognitionQueue_.size())}
+        });
 
         if (!ensureAsrProvider(activeRecognition_->providerId)) {
             auto target = activeRecognition_->target;
+            const auto recognitionId = activeRecognition_->recognitionId;
             unlink(activeRecognition_->wavPath.c_str());
             activeRecognition_.reset();
+            vinput::diagnosticLog().event("adapter", "recognition_provider_unavailable", {
+                {"recognition_id", std::to_string(recognitionId)}
+            });
             outputHandler_->showStatus(target, "Vinput: ASR provider unavailable",
                                        [callbackGate = callbackGate_] {
                                            withOwner(callbackGate, [](VinputAddon &owner) {
@@ -593,13 +684,21 @@ private:
 
         auto target = activeRecognition_->target;
         auto tPress = activeRecognition_->pressTime;
+        const auto recognitionId = activeRecognition_->recognitionId;
         auto callbackGate = callbackGate_;
-        asr_->setResultCallback([callbackGate, target, tPress](const std::string &text, bool isFinal) {
+        asr_->setDiagnosticId(recognitionId);
+        asr_->setResultCallback([callbackGate, target, tPress, recognitionId](const std::string &text, bool isFinal) {
             auto tResult = std::chrono::steady_clock::now();
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tPress).count();
             fprintf(stderr, "Vinput [timer] press→result=%ldms\n", ms);
-            FCITX_INFO() << "Vinput ASR result: " << text
+            FCITX_INFO() << "Vinput ASR result: text_len=" << text.size()
                          << " (final=" << isFinal << ")";
+            vinput::diagnosticLog().event("adapter", "recognition_result_callback", {
+                {"recognition_id", std::to_string(recognitionId)},
+                {"is_final", isFinal ? "true" : "false"},
+                {"text_length", std::to_string(text.size())},
+                {"text_hash", diagnosticHash(text)}
+            });
             withOwner(callbackGate, [&](VinputAddon &owner) {
                 owner.outputHandler_->submit(target, text, [callbackGate, target] {
                     withOwner(callbackGate, [&](VinputAddon &owner) {
@@ -609,8 +708,13 @@ private:
                 });
             });
         });
-        asr_->setErrorCallback([callbackGate, target](const std::string &error) {
+        asr_->setErrorCallback([callbackGate, target, recognitionId](const std::string &error) {
             FCITX_INFO() << "Vinput ASR error: " << error;
+            vinput::diagnosticLog().event("adapter", "recognition_error_callback", {
+                {"recognition_id", std::to_string(recognitionId)},
+                {"error_length", std::to_string(error.size())},
+                {"error_hash", diagnosticHash(error)}
+            });
             std::string status = "Vinput: recognition failed";
             if (error.find("network") != std::string::npos) {
                 status = "Vinput: network error; try again";
@@ -632,9 +736,18 @@ private:
         });
         asr_->transcribe(std::move(activeRecognition_->samples),
                          activeRecognition_->wavPath);
+        vinput::diagnosticLog().event("adapter", "recognition_provider_called", {
+            {"recognition_id", std::to_string(recognitionId)},
+            {"provider", activeRecognition_->providerId}
+        });
     }
 
     void finishRecognition() {
+        const auto recognitionId = activeRecognition_ ? activeRecognition_->recognitionId : 0;
+        vinput::diagnosticLog().event("adapter", "recognition_finished", {
+            {"recognition_id", std::to_string(recognitionId)},
+            {"queue_size", std::to_string(recognitionQueue_.size())}
+        });
         activeRecognition_.reset();
         dispatchNextRecognition();
     }
@@ -646,11 +759,15 @@ private:
     }
 
     // 松键后结束
-    void onDeactivate(bool restoreCapsLock = true) {
+    void onDeactivate() {
         active_ = false;
         tStop_ = std::chrono::steady_clock::now();
         auto recMs = std::chrono::duration_cast<std::chrono::milliseconds>(tStop_ - tActivate_).count();
         FCITX_INFO() << "Vinput deactivated (record=" << recMs << "ms)";
+        vinput::diagnosticLog().event("adapter", "capture_stop_requested", {
+            {"recognition_id", std::to_string(currentRecognitionId_)},
+            {"record_ms", std::to_string(recMs)}
+        });
 
         if (audioCapture_) {
             outputHandler_->showStatus(currentTarget_, "Vinput: processing audio...");
@@ -666,17 +783,16 @@ private:
                 ic->inputPanel().reset();
                 ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
                 ic->commitString(lastPreeditText_);
-                FCITX_INFO() << "Vinput final commit: \"" << lastPreeditText_ << "\"";
+        FCITX_INFO() << "Vinput final commit: text_len=" << lastPreeditText_.size();
             }
             lastPreeditText_.clear();
         }
 
         playSound("deactivate");  // 结束音: 低音
-        if (restoreCapsLock) {
-            // 松键后还原 CapsLock (按下时硬件层已切换, 现在补一个假按键还原)
-            revertDebounce_ = debounceCount_;
-            revertCapsLock();
-        }
+
+        // 松键后还原 CapsLock (按下时硬件层已切换, 现在补一个假按键还原)
+        revertDebounce_ = debounceCount_;
+        revertCapsLock();
     }
 
 };

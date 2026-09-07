@@ -26,7 +26,6 @@ ASR_provider/IAsrProvider
 
 adapter/OutputHandler
   |-- self-pipe thread handoff
-  |-- DesktopStrategy focus switch when supported
   `-- fcitx InputContext::commitString(text)
 ```
 
@@ -34,11 +33,9 @@ adapter/OutputHandler
 
 `adapter/` owns fcitx5 integration. It listens to keyboard events, starts and stops recording, chooses ASR providers and denoisers, shows notifications, and commits text through fcitx5.
 
-`ASR_provider/` owns audio capture, audio preprocessing, provider abstraction, provider registration, and ASR protocol implementations. It does not know about fcitx5 input contexts or desktop focus.
+`ASR_provider/` owns audio capture, audio preprocessing, provider abstraction, provider registration, and ASR protocol implementations. It does not know about fcitx5 input contexts.
 
-`OutputHandler` owns the ASR result to text commit boundary. It accepts text from worker threads, returns to the fcitx event loop through a self-pipe, optionally switches focus through `DesktopStrategy`, and commits to the currently usable input context.
-
-`DesktopStrategy` owns compositor-specific focus commands. Unsupported desktops use `NoopStrategy`, which disables focus switching and falls back to direct commit.
+`OutputHandler` owns the ASR result to text commit boundary. It accepts text from worker threads, returns to the fcitx event loop through a self-pipe, and commits to the captured input context.
 
 ## Input Flow
 
@@ -46,7 +43,7 @@ adapter/OutputHandler
 CapsLock press
   -> VinputAddon stores timing and input context metadata
   -> after activation delay, VinputAddon creates provider and AudioCapture
-  -> OutputHandler captures focused desktop window
+  -> OutputHandler captures the current input context uuid
   -> AudioCapture records and preprocesses audio
 
 CapsLock release
@@ -69,8 +66,7 @@ CapsLock release
 | AudioCapture | PulseAudio open/read failure | error/status logging; no provider call if no samples |
 | AudioCapture | missing deepfilter binary | denoiser path reports failure and leaves capture flow controlled by `AudioCapture` |
 | Provider | missing API key or model binary | provider calls `onError` or logs provider-specific failure |
-| OutputHandler | unsupported compositor | `NoopStrategy` disables focus switching and commits directly |
-| OutputHandler | focus switch timeout | commits anyway and attempts focus restore |
+| OutputHandler | captured input context no longer exists | no focused context found, result dropped and logged |
 | uinput | `/dev/uinput` unavailable | logs failure; voice input can still work but CapsLock restore is unavailable |
 
 ## Verification

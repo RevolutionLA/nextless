@@ -21,30 +21,30 @@ int main() {
     auto userDir = base / "user";
     auto systemDir = base / "system";
 
-    writeFile(systemDir / "output.json", "{\"desktop\":\"none\"}");
-    auto fallback = vinput::readConfigFileFromDirs("output.json", userDir, systemDir);
-    if (vinput::jsonStr(fallback, "desktop") != "none") {
+    writeFile(systemDir / "audio.json", "{\"denoise\":\"none\"}");
+    auto fallback = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (vinput::jsonStr(fallback, "denoise") != "none") {
         std::cerr << "system fallback was not used\n";
         fs::remove_all(base);
         return 1;
     }
-    if (!fs::exists(userDir / "output.json")) {
+    if (!fs::exists(userDir / "audio.json")) {
         std::cerr << "missing user config was not created from system config\n";
         fs::remove_all(base);
         return 1;
     }
 
-    writeFile(userDir / "output.json", "{\"desktop\":\"niri\"}");
-    auto user = vinput::readConfigFileFromDirs("output.json", userDir, systemDir);
-    if (vinput::jsonStr(user, "desktop") != "niri") {
+    writeFile(userDir / "audio.json", "{\"denoise\":\"speexdsp\"}");
+    auto user = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (vinput::jsonStr(user, "denoise") != "speexdsp") {
         std::cerr << "user config did not override system fallback\n";
         fs::remove_all(base);
         return 1;
     }
 
-    writeFile(systemDir / "output.json", "{\"desktop\":\"hyprland\"}");
-    auto preserved = vinput::readConfigFileFromDirs("output.json", userDir, systemDir);
-    if (vinput::jsonStr(preserved, "desktop") != "niri") {
+    writeFile(systemDir / "audio.json", "{\"denoise\":\"deepfilter\"}");
+    auto preserved = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (vinput::jsonStr(preserved, "denoise") != "speexdsp") {
         std::cerr << "existing user config was overwritten\n";
         fs::remove_all(base);
         return 1;

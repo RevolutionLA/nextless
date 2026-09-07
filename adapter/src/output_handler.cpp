@@ -1,5 +1,5 @@
 #include "output_handler.h"
-#include "desktop_strategy.h"
+#include "diagnostic_log.h"
 #include "vinput_config.h"
 
 #include <fcitx/inputpanel.h>
@@ -15,10 +15,16 @@
 
 namespace vinput {
 
-OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
-    desktop_ = DesktopStrategy::autoDetect();
-    FCITX_INFO() << "Vinput OutputHandler: auto-detected strategy=" << desktop_->name();
+namespace {
 
+std::string diagnosticUuid(const fcitx::ICUUID &uuid) {
+    return hashDiagnosticValue(std::string_view(
+        reinterpret_cast<const char *>(uuid.data()), uuid.size())).substr(0, 16);
+}
+
+} // namespace
+
+OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
     if (pipe(wakePipe_) != 0) {
         throw std::runtime_error("Vinput: OutputHandler pipe() failed");
     }
@@ -55,15 +61,18 @@ void OutputHandler::showStatus(const OutputTarget &target,
     enqueue(target, text, true, std::move(onShown));
 }
 
-OutputTarget OutputHandler::captureCurrentWindow() {
-    FCITX_INFO() << "Vinput [capture] detected desktop=" << desktop_->name();
-    auto capturedWinId = desktop_->getFocusedWindowId();
+OutputTarget OutputHandler::captureCurrentUuid(uint64_t recognitionId) {
     OutputTarget target;
-    target.windowId = capturedWinId;
+    target.recognitionId = recognitionId;
     target.statusSequence = ++latestStatusSequence_;
     if (auto *ic = instance_->mostRecentInputContext()) {
         target.uuid = ic->uuid();
     }
+    diagnosticLog().event("output", "target_captured", {
+        {"recognition_id", std::to_string(target.recognitionId)},
+        {"target_uuid", diagnosticUuid(target.uuid)},
+        {"status_sequence", std::to_string(target.statusSequence)}
+    });
     return target;
 }
 
@@ -77,9 +86,15 @@ void OutputHandler::enqueue(const OutputTarget &target, const std::string &text,
                             std::function<void()> completion) {
     {
         std::lock_guard<std::mutex> lk(pendingMutex_);
-        pending_.push_back({text, isStatus, target.uuid, target.windowId,
-                            target.statusSequence, std::move(completion)});
+        pending_.push_back({text, isStatus, target.uuid,
+                            target.statusSequence, target.recognitionId,
+                            std::move(completion)});
     }
+    diagnosticLog().event("output", isStatus ? "status_enqueued" : "result_enqueued", {
+        {"recognition_id", std::to_string(target.recognitionId)},
+        {"target_uuid", diagnosticUuid(target.uuid)},
+        {"text_length", std::to_string(text.size())}
+    });
     wake();
 }
 
@@ -95,116 +110,52 @@ void OutputHandler::drainAndCommit() {
 
     // Status belongs in the input panel, never in the application's document.
     for (auto &p : batch) {
-        if (!p.isStatus) continue;
-        if (p.statusSequence < latestStatusSequence_) {
+        if (p.isStatus) {
+            if (p.statusSequence < latestStatusSequence_) {
+                if (p.completion) p.completion();
+                continue;
+            }
+            auto *ic = instance_->inputContextManager().findByUUID(p.targetUuid);
+            if (ic) {
+                ic->inputPanel().setAuxUp(fcitx::Text(p.text));
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                diagnosticLog().event("output", "status_shown", {
+                    {"recognition_id", std::to_string(p.recognitionId)},
+                    {"target_uuid", diagnosticUuid(p.targetUuid)},
+                    {"text_length", std::to_string(p.text.size())}
+                });
+            } else {
+                diagnosticLog().event("output", "status_context_missing", {
+                    {"recognition_id", std::to_string(p.recognitionId)},
+                    {"target_uuid", diagnosticUuid(p.targetUuid)},
+                    {"text_length", std::to_string(p.text.size())}
+                });
+            }
             if (p.completion) p.completion();
-            continue;
+        } else {
+            commitPending(std::move(p), "commit");
         }
-        auto *ic = instance_->inputContextManager().findByUUID(p.targetUuid);
-        if (ic) {
-            ic->inputPanel().setAuxUp(fcitx::Text(p.text));
-            ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-        }
-        if (p.completion) p.completion();
     }
-
-    for (auto &p : batch) {
-        if (!p.isStatus) commitQueue_.push_back(std::move(p));
-    }
-    dispatchNextCommit();
-}
-
-void OutputHandler::dispatchNextCommit() {
-    if (pendingNiriCommit_) return;
-    niriPollTimer_.reset();
-
-    while (!commitQueue_.empty()) {
-        Pending pending = std::move(commitQueue_.front());
-        commitQueue_.pop_front();
-        const auto capturedId = pending.capturedWinId;
-
-        if (capturedId.empty() || !desktop_->supportsSwitching()) {
-            commitPending(std::move(pending), "commit");
-            continue;
-        }
-
-        auto restoreId = desktop_->getFocusedWindowId();
-        if (restoreId.empty()) {
-            FCITX_INFO() << "Vinput [" << desktop_->name()
-                         << "] failed to get focused window, direct commit";
-            commitPending(std::move(pending), "commit");
-            continue;
-        }
-        if (restoreId == capturedId) {
-            FCITX_INFO() << "Vinput [" << desktop_->name()
-                         << "] window unchanged, direct commit";
-            commitPending(std::move(pending), "commit");
-            continue;
-        }
-
-        FCITX_INFO() << "Vinput [" << desktop_->name() << "] captured="
-                     << capturedId << " restore=" << restoreId;
-        desktop_->focusWindow(capturedId);
-        pendingNiriCommit_ = std::move(pending);
-        pendingCapturedId_ = capturedId;
-        pendingRestoreId_ = std::move(restoreId);
-        niriRetryCount_ = 0;
-
-        niriPollTimer_ = instance_->eventLoop().addTimeEvent(
-            CLOCK_MONOTONIC,
-            fcitx::now(CLOCK_MONOTONIC) + kNiriRetryIntervalUsec,
-            kNiriRetryIntervalUsec,
-            [this](fcitx::EventSourceTime *, uint64_t) -> bool {
-                return niriPollTick();
-            });
-        if (niriPollTimer_) return;
-
-        FCITX_ERROR() << "Vinput: failed to create focus polling timer; committing directly";
-        commitPending(std::move(*pendingNiriCommit_), "commit");
-        pendingNiriCommit_.reset();
-        if (!pendingRestoreId_.empty() && pendingRestoreId_ != pendingCapturedId_) {
-            desktop_->focusWindow(pendingRestoreId_);
-        }
-        pendingCapturedId_.clear();
-        pendingRestoreId_.clear();
-    }
-}
-
-bool OutputHandler::niriPollTick() {
-    niriRetryCount_++;
-    auto cur = desktop_->getFocusedWindowId();
-
-    if (cur == pendingCapturedId_ || niriRetryCount_ >= kNiriRetryMax) {
-        if (cur != pendingCapturedId_) {
-            fprintf(stderr, "Vinput [%s] focus switch timeout after %dms, committing anyway\n",
-                    desktop_->name(),
-                    niriRetryCount_ * kNiriRetryIntervalUsec / 1000);
-        }
-
-        commitPending(std::move(*pendingNiriCommit_), "commit");
-        pendingNiriCommit_.reset();
-
-        if (!pendingRestoreId_.empty() && pendingRestoreId_ != pendingCapturedId_) {
-            desktop_->focusWindow(pendingRestoreId_);
-        }
-
-        pendingCapturedId_.clear();
-        pendingRestoreId_.clear();
-        wake();
-        return false;
-    }
-
-    return true;
 }
 
 void OutputHandler::commitPending(Pending pending, const char *label) {
     auto *ic = instance_->inputContextManager().findByUUID(pending.targetUuid);
     if (!ic) {
+        diagnosticLog().event("output", "commit_context_missing", {
+            {"recognition_id", std::to_string(pending.recognitionId)},
+            {"target_uuid", diagnosticUuid(pending.targetUuid)},
+            {"text_length", std::to_string(pending.text.size())}
+        });
         FCITX_INFO() << "Vinput [" << label << "] no focused ic, drop";
     } else {
+        diagnosticLog().event("output", "commit_context_found", {
+            {"recognition_id", std::to_string(pending.recognitionId)},
+            {"target_uuid", diagnosticUuid(pending.targetUuid)},
+            {"text_length", std::to_string(pending.text.size())}
+        });
         FCITX_INFO() << "Vinput [" << label << "] ic=" << ic
                      << " program=" << ic->program()
-                     << " text=\"" << pending.text << "\"";
+                     << " text_len=" << pending.text.size();
         if (!pending.text.empty()) ic->commitString(pending.text);
     }
     if (pending.completion) pending.completion();

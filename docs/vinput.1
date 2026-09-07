@@ -58,14 +58,6 @@ API key for Alibaba DashScope Qwen3-ASR-Flash.
 .fi
 .RE
 .TP
-\fBoutput.json\fP
-Desktop environment for window focus switching.
-.RS
-.nf
-{"desktop": "niri"}   \fR# niri | hyprland | gnome | none\fP
-.fi
-.RE
-.TP
 \fBvinput.json\fP
 Interaction parameters.
 .RS
@@ -131,8 +123,7 @@ processing and recognition.
 .SH RELIABILITY
 Doubao and Qwen use persistent serialized workers, allowing curl connections
 to be reused while preserving result order. Zipformer and FireRed intentionally
-run one local process per utterance. On niri, focus capture and restoration use
-the compositor Unix socket; unsupported desktops fall back to direct commit.
+run one local process per utterance.
 .SH FILES
 .TP
 .I ~/.config/vinput/

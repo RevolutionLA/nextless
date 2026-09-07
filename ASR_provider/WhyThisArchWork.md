@@ -4,7 +4,7 @@
 
 `ASR_provider` is responsible for audio capture, audio preprocessing, ASR backend abstraction, provider registration, and provider protocol implementations.
 
-It is not responsible for fcitx5 keyboard events, input context lookup, desktop focus switching, notifications, or `commitString()`.
+It is not responsible for fcitx5 keyboard events, input context lookup, notifications, or `commitString()`.
 
 ## Dependencies
 

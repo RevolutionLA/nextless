@@ -2,7 +2,7 @@
 
 ## Scope
 
-`ASR_provider` defines the speech recognition backend contract used by the fcitx5 adapter. Providers receive already captured audio and return recognized text. They do not own keyboard events, fcitx5 input contexts, desktop focus switching, or text commit.
+`ASR_provider` defines the speech recognition backend contract used by the fcitx5 adapter. Providers receive already captured audio and return recognized text. They do not own keyboard events, fcitx5 input contexts, or text commit.
 
 Audio capture and preprocessing are handled by `AudioCapture` before a provider is called:
 
