@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdint>
 
 namespace vinput {
 
@@ -39,6 +40,7 @@ public:
     virtual void transcribe(std::vector<int16_t> samples, const std::string &wavPath) = 0;
 
     virtual void setConfig(const std::string &key, const std::string &value) { (void)key; (void)value; }
+    virtual void setDiagnosticId(uint64_t id) { diagnosticId_ = id; }
 
     // Asynchronous providers invoke callbacks on their worker thread. Callbacks
     // must hand UI work to the host event loop.
@@ -48,6 +50,7 @@ public:
 protected:
     AsrResultCallback onResult_;
     AsrErrorCallback onError_;
+    uint64_t diagnosticId_ = 0;
 };
 
 class IAsrProviderFactory {

@@ -1,5 +1,6 @@
 #include "fire_red_provider.h"
 #include "vinput_config.h"
+#include "diagnostic_log.h"
 
 #include <unistd.h>
 #include <cerrno>
@@ -39,6 +40,10 @@ FireRedAsrProvider::FireRedAsrProvider()
 }
 
 FireRedAsrProvider::~FireRedAsrProvider() {
+    diagnosticLog().event("provider", "provider_shutdown", {
+        {"provider", "fire_red"},
+        {"recognition_id", std::to_string(diagnosticId_)}
+    });
     cancel_->store(true);
     joinAsrWorker(worker_);
 }
@@ -51,6 +56,11 @@ void FireRedAsrProvider::setConfig(const std::string &key,
 }
 
 void FireRedAsrProvider::transcribe(std::vector<int16_t>, const std::string &wavPath) {
+    diagnosticLog().event("provider", "request_started", {
+        {"provider", "fire_red"},
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"wav_hash", hashDiagnosticValue(wavPath).substr(0, 16)}
+    });
     cancel_->store(true);
     joinAsrWorker(worker_);
     cancel_ = std::make_shared<std::atomic_bool>(false);
@@ -58,11 +68,11 @@ void FireRedAsrProvider::transcribe(std::vector<int16_t>, const std::string &wav
         worker_,
         [wavPath, modelDir = expandPath(modelDir_),
          sherpaBin = expandPath(sherpaBin_), numThreads = numThreads_,
-         timeoutSec = timeoutSec_, cancel = cancel_, onR = onResult_,
-         onE = onError_]() mutable {
+          timeoutSec = timeoutSec_, cancel = cancel_, onR = onResult_,
+          onE = onError_, diagnosticId = diagnosticId_]() mutable {
             runTranscribe(wavPath, modelDir, std::move(sherpaBin), numThreads,
                           timeoutSec, std::move(cancel), std::move(onR),
-                          std::move(onE));
+                          std::move(onE), diagnosticId);
         });
 }
 
@@ -72,7 +82,8 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                                          int timeoutSec,
                                          std::shared_ptr<std::atomic_bool> cancel,
                                          AsrResultCallback onR,
-                                        AsrErrorCallback onE) {
+                                         AsrErrorCallback onE,
+                                         uint64_t diagnosticId) {
     auto t0 = std::chrono::steady_clock::now();
     struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } cleanup{wav};
 
@@ -144,6 +155,11 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
 
             timedOut = std::chrono::steady_clock::now() >= deadline;
             if (cancel->load() || timedOut) {
+                diagnosticLog().event("provider", timedOut ? "request_timeout" : "request_cancelled", {
+                    {"provider", "fire_red"},
+                    {"recognition_id", std::to_string(diagnosticId)},
+                    {"stage", "process"}
+                });
                 kill(-pid, SIGTERM);
                 for (int i = 0; i < 20; i++) {
                     waitResult = waitpid(pid, &status, WNOHANG);
@@ -199,14 +215,31 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         }
 
         auto tParse = std::chrono::steady_clock::now();
-        fprintf(stderr, "Vinput FireRed [timer] exec_total=%ldms parse=%ldms text=\"%s\"\n",
+        fprintf(stderr, "Vinput FireRed [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecv - t0).count(),
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
-                text.c_str());
+                text.size());
 
         unlink(wav.c_str());
-        if (onR && !text.empty()) onR(text, true);
-        else if (onE) onE("FireRed: empty result");
+        if (onR && !text.empty()) {
+            diagnosticLog().event("provider", "request_result", {
+                {"provider", "fire_red"},
+                {"recognition_id", std::to_string(diagnosticId)},
+                {"text_length", std::to_string(text.size())},
+                {"exec_ms", std::to_string(std::chrono::duration_cast<
+                    std::chrono::milliseconds>(tRecv - t0).count())},
+                {"parse_ms", std::to_string(std::chrono::duration_cast<
+                    std::chrono::milliseconds>(tParse - tRecv).count())}
+            });
+            onR(text, true);
+        } else if (onE) {
+            diagnosticLog().event("provider", "request_error", {
+                {"provider", "fire_red"},
+                {"recognition_id", std::to_string(diagnosticId)},
+                {"reason", "empty_result"}
+            });
+            onE("FireRed: empty result");
+        }
 }
 
 std::unique_ptr<IAsrProvider> FireRedAsrProviderFactory::create() {

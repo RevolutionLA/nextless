@@ -33,6 +33,7 @@ public:
     void setStateCallback(StateCallback cb) { onState_ = std::move(cb); }
     void setStatusTextCallback(StatusTextCallback cb) { onStatusText_ = std::move(cb); }
     void setRecordedCallback(RecordedCallback cb) { onRecorded_ = std::move(cb); }
+    void setDiagnosticId(uint64_t id) { diagnosticId_ = id; }
 
     void setDenoiseMethod(const std::string &method) { denoiseMethod_ = method; }
 
@@ -59,6 +60,7 @@ private:
     std::vector<int16_t> samples_;
     std::string wavPath_;
     uint64_t captureId_ = 0;
+    uint64_t diagnosticId_ = 0;
     static double lufsTarget_;
     static int speexLevel_;
     static double crestThreshold_;

@@ -23,7 +23,8 @@ private:
                               std::string sherpaBin, int numThreads,
                               int timeoutSec,
                               std::shared_ptr<std::atomic_bool> cancel,
-                              AsrResultCallback onR, AsrErrorCallback onE);
+                              AsrResultCallback onR, AsrErrorCallback onE,
+                              uint64_t diagnosticId);
 
     std::string modelDir_;
     std::string sherpaBin_ = "~/.local/share/vinput/sherpa-onnx/bin/sherpa-onnx-offline";

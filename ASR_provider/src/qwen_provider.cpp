@@ -1,5 +1,6 @@
 #include "qwen_provider.h"
 #include "vinput_config.h"
+#include "diagnostic_log.h"
 
 #include <curl/curl.h>
 #include <unistd.h>
@@ -71,6 +72,10 @@ QwenAsrProvider::QwenAsrProvider() {
 }
 
 QwenAsrProvider::~QwenAsrProvider() {
+    diagnosticLog().event("provider", "provider_shutdown", {
+        {"provider", "qwen"},
+        {"recognition_id", std::to_string(diagnosticId_)}
+    });
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->stopping = true;
@@ -88,7 +93,8 @@ void QwenAsrProvider::setConfig(const std::string &key, const std::string &value
 
 void QwenAsrProvider::transcribe(std::vector<int16_t> samples, const std::string &wavPath) {
     Task task{std::move(samples), wavPath, apiKey_, timeout_,
-              std::make_shared<std::atomic_bool>(false), onResult_, onError_};
+              std::make_shared<std::atomic_bool>(false), onResult_, onError_,
+              diagnosticId_};
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
         if (state_->stopping) {
@@ -113,10 +119,15 @@ void QwenAsrProvider::workerLoop(const std::shared_ptr<WorkerState> &state) {
             state->tasks.pop_front();
             state->activeCancel = task.cancel;
         }
+        diagnosticLog().event("provider", "request_worker_begin", {
+            {"provider", "qwen"},
+            {"recognition_id", std::to_string(task.diagnosticId)},
+            {"wav_hash", hashDiagnosticValue(task.wavPath).substr(0, 16)}
+        });
         processRecording(std::move(task.samples), task.wavPath,
                          std::move(task.apiKey), task.timeout,
                          std::move(task.cancel), std::move(task.onResult),
-                         std::move(task.onError));
+                         std::move(task.onError), task.diagnosticId);
         {
             std::lock_guard<std::mutex> lock(state->mutex);
             state->activeCancel.reset();
@@ -130,12 +141,23 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
                                         std::string apiKey, long timeout,
                                         std::shared_ptr<std::atomic_bool> cancel,
                                         AsrResultCallback onR,
-                                        AsrErrorCallback onE) {
+                                        AsrErrorCallback onE,
+                                        uint64_t diagnosticId) {
     fprintf(stderr, "Vinput Qwen: recorded %zu samples to %s\n",
             samples.size(), wavPath.c_str());
+    diagnosticLog().event("provider", "request_started", {
+        {"provider", "qwen"},
+        {"recognition_id", std::to_string(diagnosticId)},
+        {"wav_hash", hashDiagnosticValue(wavPath).substr(0, 16)},
+        {"sample_count", std::to_string(samples.size())}
+    });
     struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } _wav{wavPath};
 
     if (apiKey.empty()) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "missing_api_key"}
+        });
         if (onE) onE("Qwen: missing api_key in ~/.config/vinput/qwen.json");
         return;
     }
@@ -143,12 +165,20 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     auto t0 = std::chrono::steady_clock::now();
     std::ifstream wf(wavPath, std::ios::binary);
     if (!wf) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "wav_read_failed"}
+        });
         if (onE) onE("Qwen: failed to read WAV");
         return;
     }
     std::vector<uint8_t> wavData((std::istreambuf_iterator<char>(wf)),
                                   std::istreambuf_iterator<char>());
     if (wavData.empty()) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "empty_wav"}
+        });
         if (onE) onE("Qwen: empty WAV file");
         return;
     }
@@ -158,6 +188,10 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
 
     CURL *curl = getCurl();
     if (!curl) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "curl_init_failed"}
+        });
         if (onE) onE("Qwen: curl init failed");
         return;
     }
@@ -203,12 +237,22 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     auto tNetwork = std::chrono::steady_clock::now();
 
     fprintf(stderr, "Vinput Qwen: HTTP %ld\n", httpCode);
-    fprintf(stderr, "Vinput Qwen: response body: %s\n", respBody.c_str());
+    fprintf(stderr, "Vinput Qwen: response bytes=%zu\n", respBody.size());
 
     if (res != CURLE_OK) {
-        if (cancel->load()) return;
+        if (cancel->load()) {
+            diagnosticLog().event("provider", "request_cancelled", {
+                {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)}
+            });
+            return;
+        }
         fprintf(stderr, "Vinput Qwen: transport failed, curl=%d (%s)\n",
                 (int)res, curl_easy_strerror(res));
+        evictCurlHandle();
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "transport"}, {"handle_evicted", "true"}
+        });
         if (onE) {
             onE("Qwen: network request failed (" +
                 std::string(curl_easy_strerror(res)) + ")");
@@ -216,6 +260,10 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
         return;
     }
     if (httpCode != 200) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "http_status"}, {"http_code", std::to_string(httpCode)}
+        });
         if (onE) {
             if (httpCode == 429 || httpCode >= 500) {
                 onE("Qwen: service unavailable (HTTP " +
@@ -238,15 +286,29 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     }
 
     auto tParse = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Qwen [timer] encode=%ldms network=%ldms parse=%ldms text=\"%s\"\n",
+    fprintf(stderr, "Vinput Qwen [timer] encode=%ldms network=%ldms parse=%ldms text_len=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tNetwork - tEncode).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tNetwork).count(),
-            text.c_str());
+            text.size());
 
     if (onR && !text.empty()) {
+        diagnosticLog().event("provider", "request_result", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"text_length", std::to_string(text.size())},
+            {"encode_ms", std::to_string(std::chrono::duration_cast<
+                std::chrono::milliseconds>(tEncode - t0).count())},
+            {"network_ms", std::to_string(std::chrono::duration_cast<
+                std::chrono::milliseconds>(tNetwork - tEncode).count())},
+            {"parse_ms", std::to_string(std::chrono::duration_cast<
+                std::chrono::milliseconds>(tParse - tNetwork).count())}
+        });
         onR(text, true);
     } else if (onE) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "empty_result"}
+        });
         onE("Qwen: empty result");
     }
 }

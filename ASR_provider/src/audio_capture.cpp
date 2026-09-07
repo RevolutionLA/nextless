@@ -1,5 +1,6 @@
 #include "audio_capture.h"
 #include "vinput_config.h"
+#include "diagnostic_log.h"
 
 #include <pulse/mainloop.h>
 #include <pulse/error.h>
@@ -91,6 +92,9 @@ AudioCapture::AudioCapture() {
     loadAudioConfig(denoiseMethod_);
     if (!denoiseMethod_.empty())
         fprintf(stderr, "Vinput Capture: denoise=%s\n", denoiseMethod_.c_str());
+    diagnosticLog().event("audio", "capture_created", {
+        {"denoiser", denoiseMethod_.empty() ? "none" : denoiseMethod_}
+    });
 
     static bool configLoaded = false;
     if (!configLoaded) {
@@ -143,12 +147,21 @@ void AudioCapture::start() {
     captureId_ = nextCaptureId.fetch_add(1);
     wavPath_ = "/tmp/vinput_cap_" + std::to_string(getpid()) + "_" +
                std::to_string(captureId_) + ".wav";
+    diagnosticLog().event("audio", "capture_start", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)},
+        {"wav_hash", hashDiagnosticValue(wavPath_).substr(0, 16)}
+    });
     if (onState_) onState_(true);
     recordThread_ = std::thread(&AudioCapture::recordLoop, this);
 }
 
 void AudioCapture::stop() {
     stopRequested_ = true;
+    diagnosticLog().event("audio", "capture_stop", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)}
+    });
     std::lock_guard<std::mutex> lock(pulseMutex_);
     if (pulseMainloop_) pa_mainloop_wakeup(pulseMainloop_);
 }
@@ -187,6 +200,11 @@ void AudioCapture::streamReadCallback(pa_stream *stream, size_t, void *userdata)
 void AudioCapture::recordLoop() {
     std::unique_lock<std::mutex> pulseSessionLock(pulseCaptureMutex);
     const uint64_t processingTicket = nextProcessingTicket++;
+    diagnosticLog().event("audio", "capture_processing_ticket_assigned", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)},
+        {"ticket", std::to_string(processingTicket)}
+    });
     const pa_sample_spec ss{PA_SAMPLE_S16LE, 16000, 1};
     auto t0 = std::chrono::steady_clock::now();
     pa_mainloop *mainloop = pa_mainloop_new();
@@ -284,7 +302,17 @@ void AudioCapture::recordLoop() {
     }
     if (mainloop) pa_mainloop_free(mainloop);
     pulseSessionLock.unlock();
+    diagnosticLog().event("audio", "capture_processing_wait", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)},
+        {"ticket", std::to_string(processingTicket)}
+    });
     ProcessingTurn processingTurn(processingTicket);
+    diagnosticLog().event("audio", "capture_processing_begin", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)},
+        {"ticket", std::to_string(processingTicket)}
+    });
     auto tPaClose = std::chrono::steady_clock::now();
 
     if (onState_) onState_(false);
@@ -296,6 +324,11 @@ void AudioCapture::recordLoop() {
             nReads, samples_.size());
 
     if (readFailed) {
+        diagnosticLog().event("audio", "capture_read_failed", {
+            {"recognition_id", std::to_string(diagnosticId_)},
+            {"capture_id", std::to_string(captureId_)},
+            {"error_code", std::to_string(error)}
+        });
         fprintf(stderr, "Vinput Capture: read error: %s\n", pa_strerror(error));
         if (onStatusText_) onStatusText_("Vinput: microphone read failed");
         std::lock_guard<std::mutex> lk(sampleMutex_);
@@ -329,8 +362,21 @@ void AudioCapture::recordLoop() {
         // need a temporary file.
         if (!isBlank && onRecorded_) {
             writeWav(batch, wavPath_);
+            diagnosticLog().event("audio", "capture_recorded", {
+                {"recognition_id", std::to_string(diagnosticId_)},
+                {"capture_id", std::to_string(captureId_)},
+                {"sample_count", std::to_string(batch.size())},
+                {"wav_hash", hashDiagnosticValue(wavPath_).substr(0, 16)},
+                {"voice", "true"}
+            });
             onRecorded_(batch, wavPath_);
         } else if (isBlank) {
+            diagnosticLog().event("audio", "capture_no_speech", {
+                {"recognition_id", std::to_string(diagnosticId_)},
+                {"capture_id", std::to_string(captureId_)},
+                {"sample_count", std::to_string(batch.size())},
+                {"voice", "false"}
+            });
             unlink(wavPath_.c_str());
             if (onStatusText_) onStatusText_("Vinput: no speech detected");
         } else {
@@ -345,9 +391,26 @@ void AudioCapture::recordLoop() {
             samples_ = std::move(batch);
         }
     } else if (!readFailed && onStatusText_) {
+        diagnosticLog().event("audio", "capture_no_audio", {
+            {"recognition_id", std::to_string(diagnosticId_)},
+            {"capture_id", std::to_string(captureId_)}
+        });
         onStatusText_("Vinput: no audio captured");
     }
+    size_t finalSampleCount = 0;
+    {
+        std::lock_guard<std::mutex> lk(sampleMutex_);
+        finalSampleCount = samples_.size();
+    }
     finished_ = true;
+    diagnosticLog().event("audio", "capture_processing_end", {
+        {"recognition_id", std::to_string(diagnosticId_)},
+        {"capture_id", std::to_string(captureId_)},
+        {"ticket", std::to_string(processingTicket)},
+        {"sample_count", std::to_string(finalSampleCount)},
+        {"elapsed_ms", std::to_string(std::chrono::duration_cast<
+            std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count())}
+    });
 }
 
 void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string &method) {

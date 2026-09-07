@@ -114,10 +114,25 @@ struct CurlHandle {
     operator CURL*() { return curl; }
 };
 
-inline CURL* getCurl() {
+inline CurlHandle &threadLocalCurlHandle() {
     thread_local CurlHandle handle;
+    return handle;
+}
+
+inline void evictCurlHandle();
+
+inline CURL* getCurl() {
+    auto &handle = threadLocalCurlHandle();
     if (!handle.curl) return nullptr;
     return handle;
+}
+
+inline void evictCurlHandle() {
+    auto &handle = threadLocalCurlHandle();
+    if (handle.curl) {
+        curl_easy_cleanup(handle.curl);
+        handle.curl = curl_easy_init();
+    }
 }
 
 inline int cancelCurl(void *clientp, curl_off_t, curl_off_t,

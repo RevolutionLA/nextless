@@ -19,6 +19,36 @@ size_t discardResponse(char *, size_t size, size_t count, void *) {
 } // namespace
 
 int main() {
+    {
+        CURL *before = vinput::getCurl();
+        if (!before) {
+            std::cerr << "getCurl returned nullptr\n";
+            return 1;
+        }
+        void *sentinel = reinterpret_cast<void *>(0x1);
+        curl_easy_setopt(before, CURLOPT_PRIVATE, sentinel);
+        vinput::evictCurlHandle();
+        CURL *after = vinput::getCurl();
+        if (!after) {
+            std::cerr << "getCurl returned nullptr after evict\n";
+            return 1;
+        }
+        void *privateValue = nullptr;
+        curl_easy_getinfo(after, CURLINFO_PRIVATE, &privateValue);
+        if (privateValue == sentinel) {
+            std::cerr << "evictCurlHandle did not recreate the handle\n";
+            return 1;
+        }
+        CURLcode check = curl_easy_setopt(after, CURLOPT_URL,
+                                          "https://example.com/");
+        if (check != CURLE_OK) {
+            std::cerr << "recreated handle rejected CURLOPT_URL: "
+                      << static_cast<int>(check) << "\n";
+            return 1;
+        }
+        curl_easy_reset(after);
+    }
+
     int listener = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (listener < 0) {
         std::cerr << "failed to create local test socket\n";

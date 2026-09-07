@@ -34,6 +34,7 @@ private:
         std::shared_ptr<std::atomic_bool> cancel;
         AsrResultCallback onResult;
         AsrErrorCallback onError;
+        uint64_t diagnosticId;
     };
     struct WorkerState {
         std::mutex mutex;
@@ -50,7 +51,8 @@ private:
                                  int pollIntervalMsec, int maxPolls,
                                  long submitTimeout, long queryTimeout,
                                  std::shared_ptr<std::atomic_bool> cancel,
-                                 AsrResultCallback onR, AsrErrorCallback onE);
+                                  AsrResultCallback onR, AsrErrorCallback onE,
+                                  uint64_t diagnosticId);
 
     std::string apiKey_;
     std::string resourceId_;

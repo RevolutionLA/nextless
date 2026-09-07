@@ -30,6 +30,7 @@ private:
         std::shared_ptr<std::atomic_bool> cancel;
         AsrResultCallback onResult;
         AsrErrorCallback onError;
+        uint64_t diagnosticId;
     };
     struct WorkerState {
         std::mutex mutex;
@@ -44,7 +45,8 @@ private:
                                  const std::string &wavPath,
                                  std::string apiKey, long timeout,
                                  std::shared_ptr<std::atomic_bool> cancel,
-                                 AsrResultCallback onR, AsrErrorCallback onE);
+                                  AsrResultCallback onR, AsrErrorCallback onE,
+                                  uint64_t diagnosticId);
 
     std::string apiKey_;
     long timeout_ = 60;
