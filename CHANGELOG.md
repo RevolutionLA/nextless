@@ -19,11 +19,12 @@ user-visible change rather than one per commit.
   header only exists in recent fcitx5 releases; the one thing it was commented as providing
   (`now()`) is actually `std::chrono::steady_clock::now()`, and `event.h` already gives us
   `EventLoop`/`addTimeEvent`. CI runs on ubuntu-latest precisely to keep this path honest.
-- Build: the adapter now pulls fcitx5 headers in as *system* includes
-  (`dependency(..., include_type: 'system')`). Distro-packaged fcitx5 releases are not
-  `-Wpedantic`-clean (`FCITX_DECLARE_PRIVATE` leaves a class-scope semicolon), which broke the
-  CI build on Ubuntu 24.04 while passing on newer ones. `-Wall -Wextra -Wpedantic -Werror` still
-  applies in full to Nextless' own code.
+- Build on older distros: the adapter now pulls fcitx5 headers in as *system* includes
+  (`dependency(..., include_type: 'system')`) and the project moved from `warning_level=3` to
+  `warning_level=2`. Distro-packaged fcitx5 is not `-Wpedantic`-clean — `FCITX_CONFIGURATION` and
+  `FCITX_DECLARE_PRIVATE` leave a class-scope semicolon, which GCC reported against our own lines
+  on Ubuntu 24.04 while 5.1.19 was fine. `-Wall -Wextra -Werror` still applies, so a new warning in
+  Nextless' code still fails CI; `-Wpedantic` is documented as deliberately off, not silently gone.
 - README/README.zh: removed the claim that Debian ships a `libfcitx5-dev` meta package — that
   package name does not exist in either archive, only the four split `-dev` packages do.
 - README/README.zh: unit-test count corrected to 11, and the model-download block now creates

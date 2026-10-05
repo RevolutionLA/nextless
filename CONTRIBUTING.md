@@ -42,6 +42,12 @@ pactl load-module module-null-sink sink_name=ci
 newer than the last CI run and a fresh warning breaks the build, **fix the warning in the
 patch that touches that file** — do not disable `werror` and do not silence it with a cast.
 
+One exception is already made and should stay made: `-Wpedantic` is off (`warning_level=2`, not
+`3`). fcitx5's `FCITX_CONFIGURATION` / `FCITX_DECLARE_PRIVATE` macros expand to an "extra `;`" on
+the fcitx5 releases distros package, and the diagnostic lands on our line even though the cause is
+theirs. If a change makes you tempted to raise the warning level, test against an older
+`libfcitx5core-dev` first.
+
 Install locally with `sudo meson install -C build`, then `fcitx5 -r -d`.
 
 ## Testing your change

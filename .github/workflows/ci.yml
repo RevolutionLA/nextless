@@ -52,7 +52,8 @@ jobs:
           pactl info
 
       - name: Configure
-        # -Dwerror stays ON (it is the project default): a new warning must fail CI.
+        # -Dwerror stays ON (it is the project default): a new -Wall/-Wextra warning must fail CI.
+        # Do not re-add -Wpedantic here — see the comment at the top of meson.build.
         run: meson setup build --buildtype=${{ matrix.buildtype }}
 
       - name: Build
