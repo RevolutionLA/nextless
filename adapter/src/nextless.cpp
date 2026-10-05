@@ -12,7 +12,6 @@
 #include <fcitx-config/iniparser.h>       // readAsIni, safeSaveAsIni
 #include <fcitx-utils/i18n.h>             // _() translation macro
 #include <fcitx-utils/event.h>     // EventLoop, addTimeEvent
-#include <fcitx-utils/eventloopinterface.h> // now()
 #include <fcitx-utils/key.h>       // Key
 #include <fcitx-utils/keysym.h>    // FcitxKey_Caps_Lock 等键值常量
 #include <fcitx-utils/log.h>       // 日志宏 FCITX_INFO/FCITX_DEBUG 等

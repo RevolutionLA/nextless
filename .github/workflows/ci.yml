@@ -20,6 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # ubuntu-latest is currently 24.04, i.e. an *older* packaged fcitx5 than the one
+        # the maintainer develops against (26.04). That gap is the point: a build that
+        # only works on a bleeding-edge Fcitx5Core should fail here, not in an issue.
         os: [ubuntu-latest]
         buildtype: [debug, release]
     steps:

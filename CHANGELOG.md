@@ -15,6 +15,10 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- Build on older distros: the adapter dropped its `fcitx-utils/eventloopinterface.h` include. That
+  header only exists in recent fcitx5 releases; the one thing it was commented as providing
+  (`now()`) is actually `std::chrono::steady_clock::now()`, and `event.h` already gives us
+  `EventLoop`/`addTimeEvent`. CI runs on ubuntu-latest precisely to keep this path honest.
 - Build: the adapter now pulls fcitx5 headers in as *system* includes
   (`dependency(..., include_type: 'system')`). Distro-packaged fcitx5 releases are not
   `-Wpedantic`-clean (`FCITX_DECLARE_PRIVATE` leaves a class-scope semicolon), which broke the
