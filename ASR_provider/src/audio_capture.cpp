@@ -91,8 +91,14 @@ static void loadAudioConfig(std::string &denoiseMethod) {
     else if (val == "true") denoiseMethod = "speexdsp";
 }
 
-// 获取安全的 capture 目录：$XDG_RUNTIME_DIR/nextless/（模式 0700）
+// 获取安全的 capture 目录：$XDG_RUNTIME_DIR/nextless/（模式 0700）。
+// XDG_RUNTIME_DIR 缺失时兜底到 /tmp，用 mkdtemp 生成不可预测的目录名。
+// 结果缓存在函数级 static 里：mkdtemp 每进程只执行一次，start() 反复调用
+// 不会泄漏目录（issue #28）。
 static std::string secureCaptureDir() {
+    static std::string cached;
+    if (!cached.empty()) return cached;
+
     const char *xdg = getenv("XDG_RUNTIME_DIR");
     if (!xdg || !*xdg) xdg = "/tmp"; // fallback
 
@@ -132,27 +138,133 @@ static std::string secureCaptureDir() {
             chmod(dir.c_str(), 0700);
         }
     }
-    return dir;
+    cached = dir;
+    return cached;
 }
 
-// 启动时清理孤儿文件（来自之前崩溃的会话）
+// 删除 dirPath 里所有 nextless_cap_*.wav。每个 filesystem 调用用独立的
+// error_code —— 曾共享一个 ec 并在循环顶部 `if (ec) break`，一次预期内
+// 的失败（比如 remove 非空目录）会把后续所有扫描连带中止。
+static bool sweepWavsIn(const std::filesystem::path &dirPath) {
+    std::error_code ec;
+    std::vector<std::filesystem::path> files;
+    for (std::filesystem::directory_iterator it(dirPath, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        std::error_code fec;
+        if (!it->is_regular_file(fec) || fec) continue;
+        files.push_back(it->path());
+    }
+    bool removed = false;
+    for (const auto &p : files) {
+        auto filename = p.filename().string();
+        // 匹配 nextless_cap_<pid>_<n>.wav 模式
+        if (filename.rfind("nextless_cap_", 0) != 0 ||
+            filename.size() <= 13 ||
+            filename.substr(filename.size() - 4) != ".wav") continue;
+        std::error_code rec;
+        if (std::filesystem::remove(p, rec) && !rec) {
+            removed = true;
+            fprintf(stderr, "Nextless Capture: swept orphaned WAV %s\n", filename.c_str());
+        }
+    }
+    return removed;
+}
+
+// 兜底模式下兄弟目录里可能有别的会话正在写的录音，只清理放了超过
+// kOrphanMaxAgeSec 秒的文件；正常录音整个生命周期只有几秒。
+static constexpr int kOrphanMaxAgeSec = 600;
+
+// 启动时清理孤儿文件（来自之前崩溃的会话）。除当前目录外，还扫描其
+// 同级的 nextless* 目录 —— 兜底模式下旧会话的 mkdtemp 目录名不可预测，
+// 不清扫就永远删不掉（issue #28）。当前目录本身绝不删除，避免 start()
+// 拿到一个已消失的路径。
 static void sweepOrphanedWavs(const std::string &dir) {
     if (dir.empty()) return;
 
-    try {
-        for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-            auto filename = entry.path().filename().string();
-            // 匹配 nextless_cap_<pid>_<n>.wav 模式
-            if (filename.find("nextless_cap_") == 0 &&
-                filename.size() > 13 &&
-                filename.substr(filename.size() - 4) == ".wav") {
-                std::filesystem::remove(entry.path());
-                fprintf(stderr, "Nextless Capture: swept orphaned WAV %s\n", filename.c_str());
+    std::error_code ec;
+    auto current = std::filesystem::weakly_canonical(dir, ec);
+    if (ec) {
+        ec.clear();
+        current = std::filesystem::path(dir);
+    }
+
+    // 当前目录：固定路径模式下崩溃残留就落在这里，无条件清理。
+    sweepWavsIn(current);
+
+    // 先快照兄弟目录名再处理：边迭代边删除会让部分文件系统上的
+    // 目录游标行为不可靠。
+    auto parent = current.parent_path();
+    std::vector<std::filesystem::path> siblings;
+    for (std::filesystem::directory_iterator it(parent, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        std::error_code dec;
+        if (!it->is_directory(dec) || dec) continue;
+        auto name = it->path().filename().string();
+        if (name.rfind("nextless", 0) != 0) continue;
+        siblings.push_back(it->path());
+    }
+
+    for (const auto &raw : siblings) {
+        std::error_code nec;
+        auto sibling = std::filesystem::weakly_canonical(raw, nec);
+        if (nec) sibling = raw;
+        if (sibling == current) continue;
+
+        // 兄弟目录：只清理足够"陈旧"的文件，避开并发会话的活动录音。
+        std::vector<std::filesystem::path> files;
+        std::error_code fec;
+        for (std::filesystem::directory_iterator it(sibling, fec), end;
+             !fec && it != end; it.increment(fec)) {
+            std::error_code tec;
+            if (!it->is_regular_file(tec) || tec) continue;
+            files.push_back(it->path());
+        }
+        for (const auto &f : files) {
+            auto filename = f.filename().string();
+            if (filename.rfind("nextless_cap_", 0) != 0 ||
+                filename.size() <= 13 ||
+                filename.substr(filename.size() - 4) != ".wav") continue;
+            std::error_code mec;
+            auto mtime = std::filesystem::last_write_time(f, mec);
+            if (mec) continue;
+            auto age = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::now() - mtime).count();
+            if (age < kOrphanMaxAgeSec) continue;
+            std::error_code rec;
+            if (std::filesystem::remove(f, rec) && !rec) {
+                fprintf(stderr, "Nextless Capture: swept orphaned WAV %s/%s\n",
+                        sibling.filename().string().c_str(), filename.c_str());
             }
         }
-    } catch (const std::exception &e) {
-        fprintf(stderr, "Nextless Capture: failed to sweep orphans: %s\n", e.what());
+        // 目录变空了就收掉；非空（别的会话还在用）remove 失败属预期，
+        // 独立 ec，不影响后面的兄弟目录。
+        std::error_code rec;
+        std::filesystem::remove(sibling, rec);
     }
+}
+
+// 向已打开的 FILE* 写 PCM16 单声道 WAV。writeWav（自有 open 流程）和
+// dfDenoise（mkstemps 拿到 fd）共用这一份头/数据序列化，避免两处各写
+// 一份、日后格式改动只在一条路径生效（issue #29）。不 fclose，所有权
+// 归调用方。
+static void writeWavToFp(FILE *f, const std::vector<int16_t> &samples,
+                         uint32_t sampleRate) {
+    long dataSize = (long)samples.size() * 2;
+    fwrite("RIFF", 1, 4, f);
+    uint32_t chunkSize = 36 + (uint32_t)dataSize;
+    fwrite(&chunkSize, 4, 1, f);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    uint32_t sub1 = 16, sr = sampleRate, br = sampleRate * 2;
+    uint16_t fmtTag = 1, ch = 1, bps = 16, ba = 2;
+    fwrite(&sub1, 4, 1, f); fwrite(&fmtTag, 2, 1, f);
+    fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f);
+    fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f);
+    fwrite(&bps, 2, 1, f);
+    fwrite("data", 1, 4, f);
+    uint32_t ds = (uint32_t)dataSize;
+    fwrite(&ds, 4, 1, f);
+    fwrite(samples.data(), 2, samples.size(), f);
 }
 
 AudioCapture::AudioCapture() {
@@ -690,30 +802,16 @@ bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
         ~Cleanup() { unlink(path.c_str()); }
     } cleanup{tmp48k};
 
-    // 将 fd 转换为 FILE* 供 writeWav 使用（writeWav 内部会 fclose）
+    // mkstemps 原子地创建文件并拿到 fd，fdopen 后直接写 WAV —— 没有
+    // unlink+recreate 的时间窗（issue #25），头/数据序列化与 writeWav 共用
+    // writeWavToFp（issue #29）。
     FILE *f = fdopen(tmpFd, "wb");
     if (!f) {
         close(tmpFd);
         return giveUp("cannot open temp wav for writing");
     }
 
-    // 直接写入 WAV 头和数据
-    long dataSize = (long)samples48k.size() * 2;
-    fwrite("RIFF", 1, 4, f);
-    uint32_t chunkSize = 36 + (uint32_t)dataSize;
-    fwrite(&chunkSize, 4, 1, f);
-    fwrite("WAVE", 1, 4, f);
-    fwrite("fmt ", 1, 4, f);
-    uint32_t sub1 = 16, sr = 48000, br = 48000 * 2;
-    uint16_t fmtTag = 1, ch = 1, bps = 16, ba = 2;
-    fwrite(&sub1, 4, 1, f); fwrite(&fmtTag, 2, 1, f);
-    fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f);
-    fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f);
-    fwrite(&bps, 2, 1, f);
-    fwrite("data", 1, 4, f);
-    uint32_t ds = (uint32_t)dataSize;
-    fwrite(&ds, 4, 1, f);
-    fwrite(samples48k.data(), 2, samples48k.size(), f);
+    writeWavToFp(f, samples48k, 48000);
     fclose(f); // 关闭文件，deep-filter 可以读取
 
     const uint64_t writtenHash = fnv1a(samples48k);
@@ -962,22 +1060,7 @@ void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::stri
         return;
     }
 
-    long dataSize = (long)samples.size() * 2;
-    fwrite("RIFF", 1, 4, f);
-    uint32_t chunkSize = 36 + (uint32_t)dataSize;
-    fwrite(&chunkSize, 4, 1, f);
-    fwrite("WAVE", 1, 4, f);
-    fwrite("fmt ", 1, 4, f);
-    uint32_t sub1 = 16, sr = sampleRate, br = sampleRate * 2;
-    uint16_t fmtTag = 1, ch = 1, bps = 16, ba = 2;
-    fwrite(&sub1, 4, 1, f); fwrite(&fmtTag, 2, 1, f);
-    fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f);
-    fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f);
-    fwrite(&bps, 2, 1, f);
-    fwrite("data", 1, 4, f);
-    uint32_t ds = (uint32_t)dataSize;
-    fwrite(&ds, 4, 1, f);
-    fwrite(samples.data(), 2, samples.size(), f);
+    writeWavToFp(f, samples, sampleRate);
     fclose(f);
 
     auto tWav = std::chrono::steady_clock::now();
