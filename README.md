@@ -263,7 +263,6 @@ experimental resident-server path and are **not** required.)
 | `NEXTLESS_DEEP_FILTER` (env) | path to a system `deep-filter` binary, overrides the bundled location |
 | `~/.config/nextless/advanced.json` | model dirs, `num_threads`, timeouts, LUFS target, VAD thresholds |
 | `~/.config/nextless/doubao.json` / `qwen.json` | API credentials |
-| `~/.config/nextless/pa_buffer.json` | auto-detected PulseAudio buffer size (self-generated) |
 | `~/.local/share/nextless/sounds/` | optional replacements for the bundled `activate` / `deactivate` / `switch` sounds |
 
 `meson install` ships the `config/*.json.example` files (renamed to `*.json`) into the build's

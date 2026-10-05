@@ -139,7 +139,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         // 面板显示 panel_status.h 映射后的一句话, 完整路径进日志。
         if (access(sherpaBin.c_str(), X_OK) != 0) {
             onE("FireRed: sherpa-onnx runtime not found at " + sherpaBin +
-                " (see README \"Offline backends\")");
+                " (see README \"Get models (local backends)\")");
             return;
         }
         for (const char *file : {"encoder.int8.onnx", "decoder.int8.onnx",
@@ -147,7 +147,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
             const std::string path = dir + "/" + file;
             if (access(path.c_str(), R_OK) != 0) {
                 onE("FireRed: model file not found at " + path +
-                    " (see README \"Offline backends\")");
+                    " (see README \"Get models (local backends)\")");
                 return;
             }
         }
@@ -194,7 +194,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
             if (ret == ENOENT) {
                 // access() 之后到 spawn 之间文件没了, 或解释器缺失——总之还是缺运行时
                 onE("FireRed: sherpa-onnx runtime not found at " + sherpaBin +
-                    " (see README \"Offline backends\")");
+                    " (see README \"Get models (local backends)\")");
             } else {
                 onE("FireRed: spawn failed (" + std::string(strerror(ret)) + ")");
             }

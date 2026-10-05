@@ -1,5 +1,5 @@
 // 缺运行时/缺模型时, provider 的 error 要说清缺了什么、指到 README 的
-// "Offline backends"; 面板映射 (adapter/src/panel_status.h) 要把它们变成
+// "Get models (local backends)"; 面板映射 (adapter/src/panel_status.h) 要把它们变成
 // 用户能照做的提示。全部用假 HOME + 空壳二进制驱动, 不需要真的 sherpa-onnx。
 
 #include "asr_provider.h"
@@ -69,14 +69,14 @@ bool expectMissing(const fs::path &base, const std::string &name,
         std::cerr << name << ": error does not carry the configured path: " << capture.error << "\n";
         return false;
     }
-    if (capture.error.find("Offline backends") == std::string::npos) {
+    if (capture.error.find("Get models (local backends)") == std::string::npos) {
         std::cerr << name << ": error does not point at the README: " << capture.error << "\n";
         return false;
     }
 
     std::string panel = nextless::panelStatusForError(capture.error);
     if (panel.find(panelNeedle) == std::string::npos ||
-        panel.find("Offline backends") == std::string::npos) {
+        panel.find("Get models (local backends)") == std::string::npos) {
         std::cerr << name << ": panel status lost the hint: " << panel << "\n";
         return false;
     }

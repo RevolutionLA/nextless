@@ -12,7 +12,7 @@ namespace nextless {
 //
 // 顺序沿用历史行为: no speech 清空面板(当作无操作)，网络/超时/服务不可用
 // 给可重试的提示；缺运行时/模型时, 面板指出缺的是哪一块, 并指向 README
-// "Offline backends" 一节(下载命令与 aarch64 变体都在那里)。
+// "Get models (local backends)" 一节(下载命令与 aarch64 变体都在那里)。
 // 具体的缺失路径在 provider 的 error 里, 完整进日志(FCITX_INFO)。
 inline std::string panelStatusForError(const std::string &error) {
     if (isNoSpeechError(error)) return "";
@@ -26,10 +26,10 @@ inline std::string panelStatusForError(const std::string &error) {
         return "Nextless: recognition service unavailable; try again";
     }
     if (error.find("runtime not found") != std::string::npos) {
-        return "Nextless: sherpa-onnx runtime missing; see README \"Offline backends\"";
+        return "Nextless: sherpa-onnx runtime missing; see README \"Get models (local backends)\"";
     }
     if (error.find("model file not found") != std::string::npos) {
-        return "Nextless: offline model missing; see README \"Offline backends\"";
+        return "Nextless: offline model missing; see README \"Get models (local backends)\"";
     }
     return "Nextless: recognition failed";
 }

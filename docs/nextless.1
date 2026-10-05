@@ -164,8 +164,6 @@ Trigger key and default ASR backend (fcitx5 add-on settings).
 .I ~/.config/nextless/
 Configuration directory.
 .TP
-.I ~/.config/nextless/pa_buffer.json
-Auto-detected PulseAudio buffer size (created automatically).
 .TP
 .I ~/.local/share/nextless/
 Local ASR models and sherpa-onnx binaries.
@@ -176,8 +174,8 @@ Optional replacements for the notification sounds (activate, deactivate, switch)
 .I /usr/share/nextless/sounds/
 Bundled notification sounds, played through paplay or pw-play.
 .TP
-.I /usr/lib/fcitx5/nextless.so
-Addon shared library.
+.I /usr/lib/*/fcitx5/nextless.so
+Addon shared library (multiarch path; on Debian/Ubuntu it is under x86_64-linux-gnu).
 .TP
 .I /usr/share/fcitx5/addon/nextless.conf
 Addon manifest.

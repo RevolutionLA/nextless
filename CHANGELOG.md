@@ -54,7 +54,7 @@ user-visible change rather than one per commit.
   Nextless' code still fails CI; `-Wpedantic` is documented as deliberately off, not silently gone.
 - README/README.zh: removed the claim that Debian ships a `libfcitx5-dev` meta package — that
   package name does not exist in either archive, only the four split `-dev` packages do.
-- README/README.zh: unit-test count corrected to 11, and the model-download block now creates
+- README/README.zh: unit-test count corrected to 12, and the model-download block now creates
   `~/.local/share/nextless/sherpa-onnx/` before copying into it.
 - The strict-build note now reflects reality: the `-Wunused-result` in the curl-cancellation test
   helper is fixed, so `-Dwerror=true` builds clean on GCC 15 and CI keeps it that way.
