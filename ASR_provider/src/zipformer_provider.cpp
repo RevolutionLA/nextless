@@ -1,6 +1,7 @@
 #include "zipformer_provider.h"
 #include "nextless_config.h"
 #include "diagnostic_log.h"
+#include "temp_wav.h"
 
 #include <unistd.h>
 #include <cerrno>
@@ -81,15 +82,28 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                                          std::string sherpaBin, int numThreads,
                                          int timeoutSec,
                                          std::shared_ptr<std::atomic_bool> cancel,
-                                         AsrResultCallback onR,
-                                         AsrErrorCallback onE,
+                                         AsrResultCallback onResultRaw,
+                                         AsrErrorCallback onErrorRaw,
                                          uint64_t diagnosticId) {
     auto t0 = std::chrono::steady_clock::now();
-    struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } cleanup{wav};
+    // The temp WAV is deleted before either callback fires — see temp_wav.h. The wrappers keep
+    // every `onE(...)` call site below unchanged, and they replace the manual unlink()
+    // calls that used to sit right before the callbacks (and missed the early returns).
+    nextless::TempWav wavFile(wav);
+    const AsrResultCallback onResult = std::move(onResultRaw);
+    const AsrErrorCallback onError = std::move(onErrorRaw);
+    auto onR = [&wavFile, onResult](const std::string &text, bool isFinal) {
+        wavFile.drop();
+        if (onResult) onResult(text, isFinal);
+    };
+    auto onE = [&wavFile, onError](const std::string &error) {
+        wavFile.drop();
+        if (onError) onError(error);
+    };
 
         int pipefd[2];
         if (pipe2(pipefd, O_CLOEXEC) < 0) {
-            if (onE) onE("Zipformer: pipe failed");
+            onE("Zipformer: pipe failed");
             return;
         }
 
@@ -128,7 +142,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
 
         if (ret != 0) {
             close(pipefd[0]);
-            if (onE) onE("Zipformer: spawn failed");
+            onE("Zipformer: spawn failed");
             return;
         }
 
@@ -177,7 +191,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
                 }
                 close(pipefd[0]);
-                if (timedOut && onE) onE("Zipformer: recognition timed out");
+                if (timedOut) onE("Zipformer: recognition timed out");
                 return;
             }
 
@@ -193,8 +207,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
 
         if (!reaped) {
             fprintf(stderr, "Nextless Zipformer: waitpid failed\n");
-            unlink(wav.c_str());
-            if (onE) onE("Zipformer: recognition failed");
+            onE("Zipformer: recognition failed");
             return;
         }
         auto tRecv = std::chrono::steady_clock::now();
@@ -202,8 +215,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             fprintf(stderr, "Nextless Zipformer: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-            unlink(wav.c_str());
-            if (onE) onE("Zipformer: recognition failed");
+            onE("Zipformer: recognition failed");
             return;
         }
 
@@ -222,8 +234,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
 
-        unlink(wav.c_str());
-        if (onR && !isBlankAsrText(text)) {
+        if (!isBlankAsrText(text)) {
             diagnosticLog().event("provider", "request_result", {
                 {"provider", "zipformer"},
                 {"recognition_id", std::to_string(diagnosticId)},
@@ -234,7 +245,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                     std::chrono::milliseconds>(tParse - tRecv).count())}
             });
             onR(text, true);
-        } else if (onE) {
+        } else {
             diagnosticLog().event("provider", "request_error", {
                 {"provider", "zipformer"},
                 {"recognition_id", std::to_string(diagnosticId)},

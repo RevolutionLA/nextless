@@ -1,6 +1,7 @@
 #include "fire_red_provider.h"
 #include "nextless_config.h"
 #include "diagnostic_log.h"
+#include "temp_wav.h"
 
 #include <unistd.h>
 #include <cerrno>
@@ -116,15 +117,26 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                                          std::string sherpaBin, int numThreads,
                                          int timeoutSec,
                                          std::shared_ptr<std::atomic_bool> cancel,
-                                         AsrResultCallback onR,
-                                         AsrErrorCallback onE,
+                                         AsrResultCallback onResultRaw,
+                                         AsrErrorCallback onErrorRaw,
                                          uint64_t diagnosticId) {
     auto t0 = std::chrono::steady_clock::now();
-    struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } cleanup{wav};
+    // Temp WAV outlives nothing: deleted before either callback fires — see temp_wav.h.
+    nextless::TempWav wavFile(wav);
+    const AsrResultCallback onResult = std::move(onResultRaw);
+    const AsrErrorCallback onError = std::move(onErrorRaw);
+    auto onR = [&wavFile, onResult](const std::string &text, bool isFinal) {
+        wavFile.drop();
+        if (onResult) onResult(text, isFinal);
+    };
+    auto onE = [&wavFile, onError](const std::string &error) {
+        wavFile.drop();
+        if (onError) onError(error);
+    };
 
         int pipefd[2];
         if (pipe2(pipefd, O_CLOEXEC) < 0) {
-            if (onE) onE("FireRed: pipe failed");
+            onE("FireRed: pipe failed");
             return;
         }
 
@@ -161,7 +173,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
 
         if (ret != 0) {
             close(pipefd[0]);
-            if (onE) onE("FireRed: spawn failed");
+            onE("FireRed: spawn failed");
             return;
         }
 
@@ -210,7 +222,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
                 }
                 close(pipefd[0]);
-                if (timedOut && onE) onE("FireRed: recognition timed out");
+                if (timedOut) onE("FireRed: recognition timed out");
                 return;
             }
 
@@ -226,8 +238,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
 
         if (!reaped) {
             fprintf(stderr, "Nextless FireRed: waitpid failed\n");
-            unlink(wav.c_str());
-            if (onE) onE("FireRed: recognition failed");
+            onE("FireRed: recognition failed");
             return;
         }
         auto tRecv = std::chrono::steady_clock::now();
@@ -235,8 +246,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             fprintf(stderr, "Nextless FireRed: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-            unlink(wav.c_str());
-            if (onE) onE("FireRed: recognition failed");
+            onE("FireRed: recognition failed");
             return;
         }
 
@@ -255,9 +265,8 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
 
-        unlink(wav.c_str());
         stripControlTokens(text);
-        if (onR && !isBlankAsrText(text)) {
+        if (!isBlankAsrText(text)) {
             diagnosticLog().event("provider", "request_result", {
                 {"provider", "fire_red"},
                 {"recognition_id", std::to_string(diagnosticId)},
@@ -268,7 +277,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                     std::chrono::milliseconds>(tParse - tRecv).count())}
             });
             onR(text, true);
-        } else if (onE) {
+        } else {
             diagnosticLog().event("provider", "request_error", {
                 {"provider", "fire_red"},
                 {"recognition_id", std::to_string(diagnosticId)},

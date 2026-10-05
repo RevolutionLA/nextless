@@ -24,7 +24,7 @@ private:
                               std::string sherpaBin, int numThreads,
                               int timeoutSec,
                               std::shared_ptr<std::atomic_bool> cancel,
-                              AsrResultCallback onR, AsrErrorCallback onE,
+                              AsrResultCallback onResultRaw, AsrErrorCallback onErrorRaw,
                               uint64_t diagnosticId);
 
     std::string modelDir_;

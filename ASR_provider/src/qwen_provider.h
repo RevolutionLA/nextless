@@ -45,7 +45,7 @@ private:
                                  const std::string &wavPath,
                                  std::string apiKey, long timeout,
                                  std::shared_ptr<std::atomic_bool> cancel,
-                                  AsrResultCallback onR, AsrErrorCallback onE,
+                                  AsrResultCallback onResultRaw, AsrErrorCallback onErrorRaw,
                                   uint64_t diagnosticId);
 
     std::string apiKey_;

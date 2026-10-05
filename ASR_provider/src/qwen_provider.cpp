@@ -1,6 +1,7 @@
 #include "qwen_provider.h"
 #include "nextless_config.h"
 #include "diagnostic_log.h"
+#include "temp_wav.h"
 
 #include <curl/curl.h>
 #include <unistd.h>
@@ -140,8 +141,8 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
                                         const std::string &wavPath,
                                         std::string apiKey, long timeout,
                                         std::shared_ptr<std::atomic_bool> cancel,
-                                        AsrResultCallback onR,
-                                        AsrErrorCallback onE,
+                                        AsrResultCallback onResultRaw,
+                                        AsrErrorCallback onErrorRaw,
                                         uint64_t diagnosticId) {
     fprintf(stderr, "Nextless Qwen: recorded %zu samples to %s\n",
             samples.size(), wavPath.c_str());
@@ -151,14 +152,26 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
         {"wav_hash", hashDiagnosticValue(wavPath).substr(0, 16)},
         {"sample_count", std::to_string(samples.size())}
     });
-    struct Cleanup { std::string p; ~Cleanup() { unlink(p.c_str()); } } _wav{wavPath};
+    // Delete the temp WAV before either callback runs — see temp_wav.h. The wrappers below keep
+    // every existing `onE(...)` call site working unchanged while guaranteeing the order.
+    nextless::TempWav wavFile(wavPath);
+    const AsrResultCallback onResult = std::move(onResultRaw);
+    const AsrErrorCallback onError = std::move(onErrorRaw);
+    auto onR = [&wavFile, onResult](const std::string &text, bool isFinal) {
+        wavFile.drop();
+        if (onResult) onResult(text, isFinal);
+    };
+    auto onE = [&wavFile, onError](const std::string &error) {
+        wavFile.drop();
+        if (onError) onError(error);
+    };
 
     if (apiKey.empty()) {
         diagnosticLog().event("provider", "request_error", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "missing_api_key"}
         });
-        if (onE) onE("Qwen: missing api_key in ~/.config/nextless/qwen.json");
+        onE("Qwen: missing api_key in ~/.config/nextless/qwen.json");
         return;
     }
 
@@ -169,7 +182,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "wav_read_failed"}
         });
-        if (onE) onE("Qwen: failed to read WAV");
+        onE("Qwen: failed to read WAV");
         return;
     }
     std::vector<uint8_t> wavData((std::istreambuf_iterator<char>(wf)),
@@ -179,7 +192,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "empty_wav"}
         });
-        if (onE) onE("Qwen: empty WAV file");
+        onE("Qwen: empty WAV file");
         return;
     }
     std::string b64 = base64Encode(wavData.data(), wavData.size());
@@ -192,7 +205,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "curl_init_failed"}
         });
-        if (onE) onE("Qwen: curl init failed");
+        onE("Qwen: curl init failed");
         return;
     }
     std::string requestBody =
@@ -253,7 +266,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "transport"}, {"handle_evicted", "true"}
         });
-        if (onE) {
+        {
             onE("Qwen: network request failed (" +
                 std::string(curl_easy_strerror(res)) + ")");
         }
@@ -264,7 +277,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "http_status"}, {"http_code", std::to_string(httpCode)}
         });
-        if (onE) {
+        {
             if (httpCode == 429 || httpCode >= 500) {
                 onE("Qwen: service unavailable (HTTP " +
                     std::to_string(httpCode) + ")");
@@ -292,7 +305,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tNetwork).count(),
             text.size());
 
-    if (onR && !isBlankAsrText(text)) {
+    if (!isBlankAsrText(text)) {
         diagnosticLog().event("provider", "request_result", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"text_length", std::to_string(text.size())},
@@ -304,7 +317,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
                 std::chrono::milliseconds>(tParse - tNetwork).count())}
         });
         onR(text, true);
-    } else if (onE) {
+    } else {
         diagnosticLog().event("provider", "request_error", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "no_speech"}
