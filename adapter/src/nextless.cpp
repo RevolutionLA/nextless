@@ -334,7 +334,6 @@ private:
     nextless::OutputTarget currentTarget_;
     fcitx::InputContext *currentIC_ = nullptr;
     fcitx::ICUUID currentUuid_ = {};  // 用于 deactivate 后仍能查找 IC
-    std::string lastPreeditText_;       // deactivate 时 commit 用
     int providerIndex_ = 0;
     int denoiserIndex_ = 0;
     uint64_t currentRecognitionId_ = 0;
@@ -872,18 +871,6 @@ private:
             finishingCaptures_.push_back(std::move(audioCapture_));
         }
         currentIC_ = nullptr;
-
-        // commit 最后收到的 preedit 文本
-        if (!lastPreeditText_.empty()) {
-            auto *ic = instance_->inputContextManager().findByUUID(currentUuid_);
-            if (ic) {
-                ic->inputPanel().reset();
-                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-                ic->commitString(lastPreeditText_);
-        FCITX_INFO() << "Nextless final commit: text_len=" << lastPreeditText_.size();
-            }
-            lastPreeditText_.clear();
-        }
 
         playSound("deactivate");  // 结束音: 低音
 

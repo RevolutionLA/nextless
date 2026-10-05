@@ -40,8 +40,9 @@ user-visible change rather than one per commit.
 - The temporary WAV of an utterance is now deleted *before* the result/error callback fires, in all
   four providers (`temp_wav.h`). Previously the deletion lived in a scope guard, so "the callback
   fired" no longer implied "the file is gone" — `cloud_provider_queue` failed intermittently in CI's
-  debug job, and the same window existed on every early return in the local providers. Reproduced
-  deterministically with `taskset -c 0` (15/15 failures on the old code, 0/15 after the fix).
+  debug job (runs 37298301668 and 37266963582 show leftover WAVs), and the same window existed on
+  every early return in the local providers. Local reproduction under `taskset -c 0` is probabilistic
+  (~5% failure rate on the old code).
 - Build on older distros: the adapter dropped its `fcitx-utils/eventloopinterface.h` include. That
   header only exists in recent fcitx5 releases; the one thing it was commented as providing
   (`now()`) is actually `std::chrono::steady_clock::now()`, and `event.h` already gives us
@@ -54,7 +55,7 @@ user-visible change rather than one per commit.
   Nextless' code still fails CI; `-Wpedantic` is documented as deliberately off, not silently gone.
 - README/README.zh: removed the claim that Debian ships a `libfcitx5-dev` meta package — that
   package name does not exist in either archive, only the four split `-dev` packages do.
-- README/README.zh: unit-test count corrected to 11, and the model-download block now creates
+- README/README.zh: unit-test count corrected to 12, and the model-download block now creates
   `~/.local/share/nextless/sherpa-onnx/` before copying into it.
 - The strict-build note now reflects reality: the `-Wunused-result` in the curl-cancellation test
   helper is fixed, so `-Dwerror=true` builds clean on GCC 15 and CI keeps it that way.
