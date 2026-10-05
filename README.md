@@ -107,7 +107,9 @@ sudo meson install -C build
 
 > `meson.build` sets `warning_level=3` and `werror=true`, and CI builds with exactly that, so a
 > compiler warning fails the build. Locally you can drop it with
-> `meson configure build -Dwerror=false` while experimenting.
+> `meson configure build -Dwerror=false` while experimenting. The fcitx5 headers themselves are
+> consumed as system includes (`include_type: 'system'`), because the versions distros package are
+> not `-Wpedantic`-clean and that is not our bug to fix.
 
 Arch users can build the provided `PKGBUILD` instead: `makepkg -si` (produces
 `fcitx5-nextless-git`).

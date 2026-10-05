@@ -15,6 +15,11 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- Build: the adapter now pulls fcitx5 headers in as *system* includes
+  (`dependency(..., include_type: 'system')`). Distro-packaged fcitx5 releases are not
+  `-Wpedantic`-clean (`FCITX_DECLARE_PRIVATE` leaves a class-scope semicolon), which broke the
+  CI build on Ubuntu 24.04 while passing on newer ones. `-Wall -Wextra -Wpedantic -Werror` still
+  applies in full to Nextless' own code.
 - README/README.zh: removed the claim that Debian ships a `libfcitx5-dev` meta package — that
   package name does not exist in either archive, only the four split `-dev` packages do.
 - README/README.zh: unit-test count corrected to 11, and the model-download block now creates

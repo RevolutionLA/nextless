@@ -60,7 +60,12 @@ jobs:
 
       - name: Report test summary
         if: always()
-        run: cat build/meson-logs/testlog.txt
+        run: |
+          if [ -f build/meson-logs/testlog.txt ]; then
+            cat build/meson-logs/testlog.txt
+          else
+            echo "No test log: the build step failed before tests could run."
+          fi
 
       - name: Upload Meson logs
         if: failure()

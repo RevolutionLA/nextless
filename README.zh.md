@@ -95,7 +95,9 @@ sudo meson install -C build
 ```
 
 > `meson.build` 里默认 `warning_level=3` + `werror=true`，CI 就按这个配置构建，所以任何编译告警
-> 都会让构建失败。本地想临时放宽：`meson configure build -Dwerror=false`。
+> 都会让构建失败。本地想临时放宽：`meson configure build -Dwerror=false`。fcitx5 自身的头文件是按
+> 系统头引入的（`include_type: 'system'`），因为各发行版打包的那几个版本过不了 `-Wpedantic`，
+> 这不该由我们来背。
 
 Arch 用户直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
 
