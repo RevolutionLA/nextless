@@ -15,6 +15,15 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- First run without the offline pieces is now actionable. Both local providers check the
+  sherpa-onnx binary (executable) and their model files (readable) before spawning, and the error
+  names the exact path — `Zipformer: sherpa-onnx runtime not found at <path> (see README "Offline
+  backends")` — instead of a bare `spawn failed` / `recognition failed`. The input panel maps
+  these to "sherpa-onnx runtime missing" / "offline model missing" with the README pointer, via
+  the new pure `panelStatusForError()` (`adapter/src/panel_status.h`), and a stub-driven test
+  (`test_missing_components`) covers all four provider failure paths plus the panel mapping. A
+  non-zero child exit also logs the first line the child printed, so a corrupt model is not
+  silent either.
 - The temporary WAV of an utterance is now deleted *before* the result/error callback fires, in all
   four providers (`temp_wav.h`). Previously the deletion lived in a scope guard, so "the callback
   fired" no longer implied "the file is gone" — `cloud_provider_queue` failed intermittently in CI's

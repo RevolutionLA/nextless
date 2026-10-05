@@ -44,6 +44,7 @@
 #include "diagnostic_log.h"
 #include "output_handler.h"
 #include "nextless_config.h"
+#include "panel_status.h"
 
 // notifications addon 公共 API (跨 addon 调用, 仅用于显示切换信息)
 #include <fcitx-module/notifications/notifications_public.h>
@@ -820,17 +821,8 @@ private:
                 {"error_length", std::to_string(error.size())},
                 {"error_hash", diagnosticHash(error)}
             });
-            std::string status = "Nextless: recognition failed";
-            if (nextless::isNoSpeechError(error)) {
-                // 没说话不是故障: 状态清空(面板复位), 什么都不上屏
-                status.clear();
-            } else if (error.find("network") != std::string::npos) {
-                status = "Nextless: network error; try again";
-            } else if (error.find("timed out") != std::string::npos) {
-                status = "Nextless: recognition timed out; try again";
-            } else if (error.find("service unavailable") != std::string::npos) {
-                status = "Nextless: recognition service unavailable; try again";
-            }
+            // 错在哪、面板说什么, 见 panel_status.h；空串表示按 no-op 处理。
+            std::string status = nextless::panelStatusForError(error);
             withOwner(callbackGate, [&](NextlessAddon &owner) {
                 owner.outputHandler_->showStatus(target, status, [callbackGate] {
                     withOwner(callbackGate, [](NextlessAddon &owner) {

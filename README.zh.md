@@ -170,6 +170,10 @@ rm -f sherpa-onnx-*.tar.bz2
 解压出来的目录名和代码里的默认路径完全一致，不需要改名。想放别处就改
 `~/.config/nextless/advanced.json`。
 
+听写时如果运行时或某个模型文件缺失，输入法面板会直接说缺的是哪一块、并指回本节对应的
+下载步骤——不再是干巴巴的 `spawn failed` / `recognition failed`；它实际找过的路径会写进
+fcitx5 日志。
+
 云端后端不需要模型，只要凭据：
 
 ```bash
@@ -242,7 +246,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 11 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落
+meson test -C build            # 12 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上

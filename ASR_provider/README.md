@@ -48,6 +48,7 @@ Downstream targets should not duplicate these dependencies unless they directly 
 
 - Audio capture failures must remain in `AudioCapture` and surface through status/error logging or the recorded callback not firing. When VAD finds no speech at all, fire the silence callback instead of a status message — silence is not a failure.
 - Provider failures must call `onError` where possible and must not touch fcitx5 input contexts. A recording that produced no recognizable speech reports `"<Provider>: no speech"` (see `isNoSpeechError()`), and model output that is empty or only whitespace/control tokens takes that same path rather than `onResult`.
+- Local providers pre-check the sherpa-onnx binary and their model files before spawning; a missing piece reports `<Provider>: ... not found at <path> (see README "Offline backends")` instead of a bare spawn/exit failure, and the adapter's `panelStatusForError()` turns that into a panel message naming the missing piece.
 - Desktop focus and text commit are adapter responsibilities and must not be added to provider code.
 - Configuration is loaded from `~/.config/nextless/*.json` first, then packaged defaults under `/etc/nextless/*.json`. Missing user config files are copied from `/etc/nextless/` on first read and existing user files are not overwritten. Repository files under `config/*.json.example` are examples only.
 

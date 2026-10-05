@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstring>
 #include <chrono>
 #include <string_view>
 #include <thread>
@@ -134,6 +135,23 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         if (onError) onError(error);
     };
 
+        // 同 Zipformer: 缺运行时 / 缺模型时先给出缺的东西与指向,
+        // 面板显示 panel_status.h 映射后的一句话, 完整路径进日志。
+        if (access(sherpaBin.c_str(), X_OK) != 0) {
+            onE("FireRed: sherpa-onnx runtime not found at " + sherpaBin +
+                " (see README \"Offline backends\")");
+            return;
+        }
+        for (const char *file : {"encoder.int8.onnx", "decoder.int8.onnx",
+                                 "tokens.txt"}) {
+            const std::string path = dir + "/" + file;
+            if (access(path.c_str(), R_OK) != 0) {
+                onE("FireRed: model file not found at " + path +
+                    " (see README \"Offline backends\")");
+                return;
+            }
+        }
+
         int pipefd[2];
         if (pipe2(pipefd, O_CLOEXEC) < 0) {
             onE("FireRed: pipe failed");
@@ -173,7 +191,13 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
 
         if (ret != 0) {
             close(pipefd[0]);
-            onE("FireRed: spawn failed");
+            if (ret == ENOENT) {
+                // access() 之后到 spawn 之间文件没了, 或解释器缺失——总之还是缺运行时
+                onE("FireRed: sherpa-onnx runtime not found at " + sherpaBin +
+                    " (see README \"Offline backends\")");
+            } else {
+                onE("FireRed: spawn failed (" + std::string(strerror(ret)) + ")");
+            }
             return;
         }
 
@@ -246,6 +270,11 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             fprintf(stderr, "Nextless FireRed: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+            // 子进程的 stderr 已被捕获; 面板只给一句结论, 原因至少要在日志里留一行
+            std::string firstLine = output.substr(0, output.find('\n'));
+            if (firstLine.size() > 200) firstLine.resize(200);
+            if (!firstLine.empty())
+                fprintf(stderr, "Nextless FireRed: child said: %s\n", firstLine.c_str());
             onE("FireRed: recognition failed");
             return;
         }

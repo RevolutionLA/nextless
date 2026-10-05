@@ -191,6 +191,10 @@ rm -f sherpa-onnx-*.tar.bz2
 Both extractions create the directory names the built-in defaults expect, so there is nothing to
 rename. Different paths can be set in `~/.config/nextless/advanced.json`.
 
+If the runtime or a model file is missing when you dictate, the input panel says which piece is
+missing and points back to this section — instead of a bare `spawn failed` / `recognition failed`.
+The exact path it looked for goes to the fcitx5 log.
+
 Cloud backends need no models — just credentials:
 
 ```bash
@@ -270,7 +274,7 @@ Copy the `config/*.json.example` files as a starting point. User files win over 
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 11 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise
+meson test -C build            # 12 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner

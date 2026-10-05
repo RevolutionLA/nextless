@@ -12,6 +12,7 @@
 #include <spawn.h>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <chrono>
 #include <thread>
 #include <string>
@@ -101,6 +102,26 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         if (onError) onError(error);
     };
 
+        // 缺运行时 / 缺模型是首次运行最常见的故障。先把缺的东西和指向说清楚,
+        // 否则用户看到的只会是 "spawn failed" / "recognition failed"。
+        // 面板显示 panel_status.h 映射出的一句话, 完整路径在这里的 error 里进日志。
+        if (access(sherpaBin.c_str(), X_OK) != 0) {
+            onE("Zipformer: sherpa-onnx runtime not found at " + sherpaBin +
+                " (see README \"Offline backends\")");
+            return;
+        }
+        for (const char *file : {"encoder-epoch-99-avg-1.onnx",
+                                 "decoder-epoch-99-avg-1.onnx",
+                                 "joiner-epoch-99-avg-1.onnx",
+                                 "tokens.txt"}) {
+            const std::string path = dir + "/" + file;
+            if (access(path.c_str(), R_OK) != 0) {
+                onE("Zipformer: model file not found at " + path +
+                    " (see README \"Offline backends\")");
+                return;
+            }
+        }
+
         int pipefd[2];
         if (pipe2(pipefd, O_CLOEXEC) < 0) {
             onE("Zipformer: pipe failed");
@@ -142,7 +163,13 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
 
         if (ret != 0) {
             close(pipefd[0]);
-            onE("Zipformer: spawn failed");
+            if (ret == ENOENT) {
+                // access() 之后到 spawn 之间文件没了, 或解释器缺失——总之还是缺运行时
+                onE("Zipformer: sherpa-onnx runtime not found at " + sherpaBin +
+                    " (see README \"Offline backends\")");
+            } else {
+                onE("Zipformer: spawn failed (" + std::string(strerror(ret)) + ")");
+            }
             return;
         }
 
@@ -215,6 +242,11 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             fprintf(stderr, "Nextless Zipformer: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+            // 子进程的 stderr 已被捕获; 面板只给一句结论, 原因至少要在日志里留一行
+            std::string firstLine = output.substr(0, output.find('\n'));
+            if (firstLine.size() > 200) firstLine.resize(200);
+            if (!firstLine.empty())
+                fprintf(stderr, "Nextless Zipformer: child said: %s\n", firstLine.c_str());
             onE("Zipformer: recognition failed");
             return;
         }
