@@ -62,6 +62,20 @@ jobs:
       - name: Test
         run: meson test -C build --print-errorlogs
 
+      - name: Staged install ships the packaged defaults
+        # Guards the install rules themselves: if a config example stops being installed, or
+        # is renamed out of the loader's view, that must fail here, not in a bug report.
+        run: |
+          DESTDIR="$PWD/stage" meson install -C build
+          for name in doubao qwen audio nextless advanced; do
+            f=$(find stage -path "*/nextless/$name.json" -type f | head -1)
+            if [ -z "$f" ]; then
+              echo "staged install is missing $name.json (looked under */nextless/)"
+              exit 1
+            fi
+          done
+          echo "all five packaged defaults are installed by the build"
+
       - name: Report test summary
         if: always()
         run: |

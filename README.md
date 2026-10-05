@@ -262,8 +262,11 @@ experimental resident-server path and are **not** required.)
 | `~/.config/nextless/pa_buffer.json` | auto-detected PulseAudio buffer size (self-generated) |
 | `~/.local/share/nextless/sounds/` | optional replacements for the bundled `activate` / `deactivate` / `switch` sounds |
 
-Copy the `config/*.json.example` files as a starting point. User files win over `/etc/nextless/`
-(the packaged defaults), and missing user files are created from `/etc/nextless/` on first read.
+`meson install` ships the `config/*.json.example` files (renamed to `*.json`) into the build's
+`sysconfdir/nextless` — `/etc/nextless` for distro builds (the PKGBUILD passes `--sysconfdir=/etc`,
+and `prefix=/usr` alone already resolves there), `/usr/local/etc/nextless` for a plain source
+install. The runtime reads that same directory, compiled in: user files win, and a missing user
+file is copied from the packaged directory on first read.
 
 ## Development
 
@@ -318,7 +321,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 
 | | Item | Done when |
 |---|---|---|
-| 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. | CI is green in both build types; the assertion tolerates the legitimate callback-then-cleanup order |
+| 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. **Fixed in [#10](https://github.com/RevolutionLA/nextless/pull/10)** — all four providers now delete the WAV *before* the callback (reproduced with `taskset -c 0`: 15/15 → 0/15). | ✅ CI is green in both build types; the fix is stronger than this finish line — callback-then-cleanup is now illegal, so the assertion stays strict instead of tolerating it |
 | 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. | meson ships `config/*.json.example` to `/etc/nextless`, or the docs stop promising it |
 | 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. | the input panel names the missing piece and where to get it (feeds the wizard below) |
 | 4 | **Real install and removal path**: `.deb` first (dependency list, model fetch, clean uninstall), AUR after. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |

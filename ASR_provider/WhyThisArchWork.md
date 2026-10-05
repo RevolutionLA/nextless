@@ -8,7 +8,7 @@ It is not responsible for fcitx5 keyboard events, input context lookup, notifica
 
 ## Dependencies
 
-This module may depend on PulseAudio, libebur128, speexdsp, soxr, libcurl, local ASR binaries, per-user configuration under `~/.config/nextless/`, and packaged default configuration under `/etc/nextless/`.
+This module may depend on PulseAudio, libebur128, speexdsp, soxr, libcurl, local ASR binaries, per-user configuration under `~/.config/nextless/`, and packaged default configuration under the build's `sysconfdir`/nextless (`/etc/nextless` for distro builds, compiled in as `NEXTLESS_PACKAGED_CONFIG_DIR`).
 
 It must not depend on fcitx5 adapter types, compositor IPC APIs, or UI state owned by the adapter.
 
@@ -34,7 +34,7 @@ Recording and recognition are separated at a stable data boundary: `std::vector<
 
 Hardware buffer detection stores cached burst sizes by PulseAudio default source id in `~/.config/nextless/pa_buffer.json`. Devices with different burst behavior no longer share one `buffer_bytes` value, while the old single-value cache is migrated to the currently selected source on first use.
 
-Runtime configuration reads per-user files first and falls back to `/etc/nextless/*.json`. If a user file is missing, the packaged default is copied to `~/.config/nextless/` at runtime and existing user files are not overwritten. This makes package installation useful without writing into an unknown user's home directory during pacman install, while still letting pacman preserve edited system defaults through `backup=...` during upgrades.
+Runtime configuration reads per-user files first and falls back to the packaged defaults under the build's `sysconfdir`/nextless (`/etc/nextless` for distro builds — meson installs the example files there and compiles the same path into the loader, so the two cannot drift). If a user file is missing, the packaged default is copied to `~/.config/nextless/` at runtime and existing user files are not overwritten. This makes package installation useful without writing into an unknown user's home directory during pacman install, while still letting pacman preserve edited system defaults through `backup=...` during upgrades.
 
 ## Failure Modes
 

@@ -1,5 +1,14 @@
 # Nextless 开发发现记录
 
+## 2026-10-05
+
+### 默认配置的安装与读取同源（审查清单第 2 项）
+
+- 问题：`nextless_config.h` 的 `systemConfigDir()` 写死 `/etc/nextless`，meson 却没有任何安装规则往那里装东西——之前只有 `PKGBUILD` 自己往 `/etc/nextless/` 装了一份。于是源码安装（以及任何不走 PKGBUILD 的打包）实际上永远读不到"打包默认值"，`config/*.json.example` 只躺在仓库里。
+- 方案：`meson.build` 把构建时的 `sysconfdir`/nextless 作为安装目录，用 `install_data(..., rename: [...])` 去掉 `.example` 后缀，并把同一路径编译进 `ASR_provider`（`NEXTLESS_PACKAGED_CONFIG_DIR`，仿照 `NEXTLESS_PACKAGED_SOUND_DIR` 的既有做法）。loader 读的目录与 `meson install` 写入的目录从此同源：发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`，或 `prefix=/usr` 时 meson 自身的解析结果），普通源码安装是 `/usr/local/etc/nextless`。
+- `PKGBUILD` 改为传 `--sysconfdir=/etc`，删掉自己那段 `/etc/nextless/` 的安装循环（doc 目录的拷贝保留）；`backup=(...)` 不变，pacman 升级保护照旧。
+- 验证：`DESTDIR=/tmp/... meson install` 后五个文件落在 `etc/nextless/*.json`；`.so` 里 `strings` 出的路径与安装目录一致；`meson test` 全绿。
+
 ## 2026-06-16 (续)
 
 ### 独立 uinput CapsLock 测试工具

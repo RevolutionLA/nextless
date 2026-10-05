@@ -49,7 +49,7 @@ Downstream targets should not duplicate these dependencies unless they directly 
 - Audio capture failures must remain in `AudioCapture` and surface through status/error logging or the recorded callback not firing. When VAD finds no speech at all, fire the silence callback instead of a status message — silence is not a failure.
 - Provider failures must call `onError` where possible and must not touch fcitx5 input contexts. A recording that produced no recognizable speech reports `"<Provider>: no speech"` (see `isNoSpeechError()`), and model output that is empty or only whitespace/control tokens takes that same path rather than `onResult`.
 - Desktop focus and text commit are adapter responsibilities and must not be added to provider code.
-- Configuration is loaded from `~/.config/nextless/*.json` first, then packaged defaults under `/etc/nextless/*.json`. Missing user config files are copied from `/etc/nextless/` on first read and existing user files are not overwritten. Repository files under `config/*.json.example` are examples only.
+- Configuration is loaded from `~/.config/nextless/*.json` first, then packaged defaults under the build's `sysconfdir`/nextless (`/etc/nextless` for distro builds; the path is compiled in as `NEXTLESS_PACKAGED_CONFIG_DIR` by meson). Missing user config files are copied from there on first read and existing user files are not overwritten. Repository files under `config/*.json.example` are examples only.
 
 ## Verification
 

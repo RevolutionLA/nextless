@@ -234,8 +234,11 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 | `~/.config/nextless/pa_buffer.json` | 自动探测的 PulseAudio buffer（自生成） |
 | `~/.local/share/nextless/sounds/` | 覆盖随包的 `activate` / `deactivate` / `switch` 提示音（可选） |
 
-可从 `config/*.json.example` 复制起步。用户目录优先于 `/etc/nextless/`（打包的默认值），
-首次读取时缺失的用户配置会自动从 `/etc/nextless/` 拷一份，不会覆盖已有文件。
+`meson install` 会把 `config/*.json.example`（去掉 `.example` 后缀）装进构建时的
+`sysconfdir`/nextless——发行版构建是 `/etc/nextless`（PKGBUILD 显式传 `--sysconfdir=/etc`，
+`prefix=/usr` 时 meson 本身也会解析到那里），普通源码安装是 `/usr/local/etc/nextless`。
+运行时读取的就是同一个目录（编译期注入）：用户文件优先，缺失时首次读取会从打包目录拷一份，
+不会覆盖已有文件。
 
 ## 开发
 
@@ -288,7 +291,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 
 | | 事项 | 完成标准 |
 |---|---|---|
-| 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。 | 两种构建都绿；断言允许「先回调、后清理」这个合法顺序 |
+| 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。**已修复，[#10](https://github.com/RevolutionLA/nextless/pull/10)**——四个 provider 现在都在回调触发前删掉临时 WAV（用 `taskset -c 0` 复现：15/15 → 0/15 失败）。 | ✅ 两种构建都绿；修复比这条完成标准更严——「先回调、后清理」已不合法，断言保持严格而非放宽 |
 | 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。 | meson 把 `config/*.json.example` 装到 `/etc/nextless`，或者文档不再这么承诺 |
 | 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。 | 输入法面板直接说明缺哪一块、去哪拿（也是下面向导的前置） |
 | 4 | **真正的安装与卸载路径**：先 `.deb`（依赖、模型获取、干净卸载），再 AUR。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |

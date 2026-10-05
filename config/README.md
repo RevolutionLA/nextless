@@ -1,13 +1,13 @@
 # Configuration Examples
 
-This directory stores example configuration files only. Packaged defaults are installed to `/etc/nextless/`; per-user overrides live in `~/.config/nextless/`.
+This directory stores example configuration files only. `meson install` ships them (renamed to `*.json`) into the build's `sysconfdir`/nextless — `/etc/nextless` for distro builds — and the runtime reads that same directory. Per-user overrides live in `~/.config/nextless/`.
 
 ## Boundary
 
 - Track `*.json.example` in Git.
 - Do not track `*.json` in this directory.
-- Real API keys, local paths, and user preferences belong in `/etc/nextless/*.json` or `~/.config/nextless/*.json`.
-- Runtime lookup order is `~/.config/nextless/*.json` first, then `/etc/nextless/*.json`; missing user files are copied from `/etc/nextless/` on first read.
+- Real API keys, local paths, and user preferences belong in `~/.config/nextless/*.json` (your copy wins) or the packaged defaults under `/etc/nextless/*.json`.
+- Runtime lookup order is `~/.config/nextless/*.json` first, then the packaged defaults installed by the same build (compiled in as `NEXTLESS_PACKAGED_CONFIG_DIR`); missing user files are copied from there on first read.
 - `.gitignore` ignores `config/*.json` to reduce the chance of committing real credentials.
 
 ## Initial Setup
@@ -35,4 +35,4 @@ After copying, edit the files under `~/.config/nextless/`. Do not put real keys 
 
 ## Update Rule
 
-When adding a new runtime config key, update the relevant `.json.example`, this README, and the user-facing configuration section in `README.md`.
+When adding a new runtime config key, update the relevant `.json.example`, this README, and the user-facing configuration section in `README.md`. When adding a whole new config file, also add it to the `install_data(... rename: [...])` list in `meson.build`, or it will never be installed.
