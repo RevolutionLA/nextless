@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Issue #5: tools/get_models.sh must (1) map arches to the exact v1.13.8
+# asset names (aarch64 uses the -shared-cpu variant; a sed over the x64 name
+# 404s upstream), (2) install into ~/.local/share/nextless and nowhere else,
+# (3) be idempotent, and (4) leave no half-extracted model when a download
+# is corrupt or extracts an unexpected directory. The install legs run
+# against fake file:// release trees via the NEXTLESS_RELEASE_BASE /
+# NEXTLESS_MODEL_BASE test hook, so CI never touches the 1.8 GB assets.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+script="$here/../tools/get_models.sh"
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# Pull the constants the script itself declares, so the test cannot drift
+# from the script silently.
+V=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' "$script")
+ZIPDIR=$(sed -n 's/^ZIPFORMER_DIR="\([^"]*\)".*/\1/p' "$script")
+FIRDIR=$(sed -n 's/^FIRERED_DIR="\([^"]*\)".*/\1/p' "$script")
+
+# --- constants vs advanced.json.example --------------------------------------
+cfg="$here/../config/advanced.json.example"
+cfg_zip=$(sed -n 's|.*"model_dir": ".*models/\([^"]*\)".*|\1|p' "$cfg" | head -1)
+cfg_fir=$(sed -n 's|.*"model_dir": ".*models/\([^"]*\)".*|\1|p' "$cfg" | tail -1)
+[ "$ZIPDIR" = "$cfg_zip" ] || fail "script Zipformer dir '$ZIPDIR' != advanced.json.example '$cfg_zip'"
+[ "$FIRDIR" = "$cfg_fir" ] || fail "script FireRed dir '$FIRDIR' != advanced.json.example '$FIRDIR'"
+
+# --- dry-run URL mapping -------------------------------------------------------
+out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --arch=x86_64 --backend=both)
+grep -q "sherpa-onnx-v${V}-linux-x64-shared.tar.bz2" <<<"$out" || fail "x86_64 runtime URL wrong"
+out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --arch=aarch64 --backend=both)
+grep -q "sherpa-onnx-v${V}-linux-aarch64-shared-cpu.tar.bz2" <<<"$out" \
+    || fail "aarch64 must use the -shared-cpu asset"
+if grep -q -- "-linux-aarch64-shared\.tar\.bz2" <<<"$out"; then
+    fail "aarch64 URL is the sed-over-x64 name that 404s upstream"
+fi
+if NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --arch=riscv64 >/dev/null 2>&1; then
+    fail "unknown arch should exit non-zero"
+fi
+
+# --- fake release trees ---------------------------------------------------------
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+rel="$tmp/rel" models="$tmp/models"
+mkdir -p "$rel" "$models" "$tmp/stage"
+
+rt_top="sherpa-onnx-v${V}-linux-x64-shared"
+mkdir -p "$tmp/stage/$rt_top/bin" "$tmp/stage/$rt_top/lib"
+printf '#!/bin/sh\n' > "$tmp/stage/$rt_top/bin/sherpa-onnx"
+printf '#!/bin/sh\n' > "$tmp/stage/$rt_top/bin/sherpa-onnx-offline"
+chmod +x "$tmp/stage/$rt_top/bin/"*
+: > "$tmp/stage/$rt_top/lib/libonnxruntime.so.1.13.1"
+tar -cjf "$rel/$rt_top.tar.bz2" -C "$tmp/stage" "$rt_top"
+
+mkdir -p "$tmp/stage/$ZIPDIR"
+for f in encoder-epoch-99-avg-1.onnx decoder-epoch-99-avg-1.onnx \
+         joiner-epoch-99-avg-1.onnx tokens.txt; do
+    echo "fake" > "$tmp/stage/$ZIPDIR/$f"
+done
+tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
+
+export HOME="$tmp/home"
+DATA="$HOME/.local/share/nextless"
+run() { NEXTLESS_RELEASE_BASE="file://$rel" NEXTLESS_MODEL_BASE="file://$models" \
+        bash "$script" "$@"; }
+
+# --- full install (zipformer leg) -----------------------------------------------
+run --backend=zipformer -y > "$tmp/log1" 2>&1 || fail "install failed: $(cat "$tmp/log1")"
+[ -x "$DATA/sherpa-onnx/bin/sherpa-onnx" ] || fail "runtime bin missing"
+[ -x "$DATA/sherpa-onnx/bin/sherpa-onnx-offline" ] || fail "runtime offline bin missing"
+[ -f "$DATA/sherpa-onnx/lib/libonnxruntime.so.1.13.1" ] || fail "runtime lib missing"
+[ -f "$DATA/models/$ZIPDIR/tokens.txt" ] || fail "zipformer model missing"
+# FireRed was not requested: must not exist
+[ ! -e "$DATA/models/$FIRDIR" ] || fail "installed FireRed without being asked"
+# nothing outside the data home (the parent dirs mkdir -p had to create are
+# fine; no files may live outside DATA)
+if find "$HOME" -type f -not -path "$DATA*" | grep -q .; then
+    fail "wrote files outside ~/.local/share/nextless: $(find "$HOME" -type f -not -path "$DATA*")"
+fi
+# staging cleaned
+if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging dir left behind"; fi
+
+# --- idempotency -------------------------------------------------------------------
+run --backend=zipformer -y > "$tmp/log2" 2>&1 || fail "re-run failed: $(cat "$tmp/log2")"
+grep -q "already installed" "$tmp/log2" || fail "re-run did not skip installed pieces"
+if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "re-run left staging"; fi
+
+# --- corrupt download leaves no half-extracted model ---------------------------------
+printf 'not a bzip2 file' > "$models/$FIRDIR.tar.bz2"
+if run --backend=firered -y > "$tmp/log3" 2>&1; then
+    fail "corrupt archive must abort"
+fi
+grep -qi "extract" "$tmp/log3" || fail "no clear extraction error: $(cat "$tmp/log3")"
+if ls -A "$DATA/models" | grep -q "$FIRDIR"; then fail "half-extracted FireRed present"; fi
+if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after failure"; fi
+
+# --- unexpected top-level directory is refused ---------------------------------------
+mkdir -p "$tmp/stage/wrong-name" && echo x > "$tmp/stage/wrong-name/tokens.txt"
+tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" wrong-name
+rm -rf "$DATA/models/$ZIPDIR"
+if run --backend=zipformer -y > "$tmp/log4" 2>&1; then
+    fail "unexpected dir name must abort"
+fi
+grep -qi "other than" "$tmp/log4" || fail "no directory-name error: $(cat "$tmp/log4")"
+[ ! -e "$DATA/models/wrong-name" ] || fail "wrong-name dir escaped into models/"
+if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after name failure"; fi
+
+echo "get_models.sh: all checks passed"

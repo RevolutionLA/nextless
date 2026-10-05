@@ -2,8 +2,9 @@ post_install() {
     echo "==> Nextless: default configuration files are installed under /etc/nextless/."
     echo "==> Pacman will preserve edited /etc/nextless/*.json files on upgrade and may create .pacnew files."
     echo "==> Missing per-user config files are created from /etc/nextless/ at runtime under ~/.config/nextless/."
-    printf '\033[1;31m==> Nextless: Local ASR models (zipformer/fire-red) must be downloaded separately.\033[0m\n'
-    echo "==> See setup instructions: https://github.com/RevolutionLA/nextless#4-get-models-local-backends"
+    printf '\033[1;31m==> Nextless: Local ASR models (zipformer/fire-red) are not in the package.\033[0m\n'
+    echo "==> Install them with the bundled helper (run as the desktop user, no sudo): nextless-get-models"
+    echo "==> Or follow the manual steps: https://github.com/RevolutionLA/nextless#4-get-models-local-backends"
     echo "==> The push-to-talk key is configurable: fcitx5 配置 -> 插件 -> Nextless -> Hotkey (default Right Ctrl)."
     echo "==> Cloud providers (doubao/qwen) only need API keys configured."
 }

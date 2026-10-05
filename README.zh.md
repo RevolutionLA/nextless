@@ -144,10 +144,23 @@ fcitx5 -r -d
 ### 4. 下载模型（离线后端）
 
 ```bash
+nextless-get-models
+```
+
+整步就这一条命令。这个助手（随插件一起安装；装之前想跑就是仓库里的
+`tools/get_models.sh`）会检测 CPU 架构、下载前先把体积报给你、并让你在三选一里挑
+Zipformer / FireRed / 都要（非交互用 `--backend=...`）。它只写 `~/.local/share/nextless/`
+这一个目录；重复运行会跳过已装好的部分；解压出来的目录名和 `advanced.json` 期望的
+一致才会落位，所以下载失败不会留下半个模型。`--dry-run` 只打印计划，不动任何东西。
+
+想自己动手的话，手工路径：
+
+```bash
 mkdir -p ~/.local/share/nextless/sherpa-onnx ~/.local/share/nextless/models
 cd /tmp
 
 # sherpa-onnx 运行时：bin/ 和 lib/ 都要拷，二进制用的是 rpath $ORIGIN/../lib
+# aarch64 的资产名是 ...-linux-aarch64-shared-cpu.tar.bz2（去掉 -cpu 会 404）
 V=1.13.8
 curl -LO "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${V}/sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
 tar xf "sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
@@ -170,9 +183,9 @@ rm -f sherpa-onnx-*.tar.bz2
 解压出来的目录名和代码里的默认路径完全一致，不需要改名。想放别处就改
 `~/.config/nextless/advanced.json`。
 
-听写时如果运行时或某个模型文件缺失，输入法面板会直接说缺的是哪一块、并指回本节对应的
-下载步骤——不再是干巴巴的 `spawn failed` / `recognition failed`；它实际找过的路径会写进
-fcitx5 日志。
+听写时如果运行时或某个模型文件缺失，输入法面板会直接说缺的是哪一块、让你跑
+`nextless-get-models`——不再是干巴巴的 `spawn failed` / `recognition failed`；它实际
+找过的路径会写进 fcitx5 日志。
 
 云端后端不需要模型，只要凭据：
 
@@ -249,7 +262,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 12 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示
+meson test -C build            # 15 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、get_models 契约
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上

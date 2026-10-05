@@ -164,10 +164,26 @@ fcitx5 -r -d
 ### 4. Get models (local backends)
 
 ```bash
+nextless-get-models
+```
+
+That is the whole step. The helper (installed next to the addon; `tools/get_models.sh`
+in the repo if you want to run it before installing) detects the CPU architecture, shows
+the download size before fetching anything, and lets you pick Zipformer, FireRed, or both
+(`--backend=...` for non-interactive runs). It writes only inside `~/.local/share/nextless/`,
+is safe to re-run — already-installed pieces are skipped — and only moves an archive into
+place after verifying the extracted directory names are the ones `advanced.json` expects,
+so a failed download leaves no half-extracted model behind. `--dry-run` prints the plan
+without touching anything.
+
+Manual path, if you would rather do it yourself:
+
+```bash
 mkdir -p ~/.local/share/nextless/sherpa-onnx ~/.local/share/nextless/models
 cd /tmp
 
 # sherpa-onnx runtime (shared build: copy bin/ *and* lib/ — the binaries use rpath $ORIGIN/../lib)
+# aarch64: the asset name is ...-linux-aarch64-shared-cpu.tar.bz2 (plain -shared is a 404)
 V=1.13.8
 curl -LO "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${V}/sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
 tar xf "sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
@@ -192,8 +208,8 @@ Both extractions create the directory names the built-in defaults expect, so the
 rename. Different paths can be set in `~/.config/nextless/advanced.json`.
 
 If the runtime or a model file is missing when you dictate, the input panel says which piece is
-missing and points back to this section — instead of a bare `spawn failed` / `recognition failed`.
-The exact path it looked for goes to the fcitx5 log.
+missing and tells you to run `nextless-get-models` — instead of a bare `spawn failed` /
+`recognition failed`. The exact path it looked for goes to the fcitx5 log.
 
 Cloud backends need no models — just credentials:
 
@@ -276,7 +292,7 @@ file is copied from the packaged directory on first read.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 12 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components
+meson test -C build            # 15 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, temp-dir cleanup, get_models contract
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner

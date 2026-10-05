@@ -76,7 +76,7 @@ bool expectMissing(const fs::path &base, const std::string &name,
 
     std::string panel = nextless::panelStatusForError(capture.error);
     if (panel.find(panelNeedle) == std::string::npos ||
-        panel.find("Get models (local backends)") == std::string::npos) {
+        panel.find("nextless-get-models") == std::string::npos) {
         std::cerr << name << ": panel status lost the hint: " << panel << "\n";
         return false;
     }

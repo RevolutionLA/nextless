@@ -69,3 +69,8 @@ test('denoise_fallback', test_denoise_fallback, timeout: 30)
 test('missing_components', test_missing_components)
 test('audio_config_loader', test_audio_config_loader)
 test('capture_dir_sweep', test_capture_dir_sweep, timeout: 30)
+
+# Issue #5: get_models.sh contract test — arch/asset-name mapping, install
+# layout, idempotency, and "no half-extracted model on failure" (runs
+# against fake file:// release trees, no network).
+test('get_models', find_program('test_get_models.sh'), timeout: 120)
