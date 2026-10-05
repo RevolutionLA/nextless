@@ -292,7 +292,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tNetwork).count(),
             text.size());
 
-    if (onR && !text.empty()) {
+    if (onR && !isBlankAsrText(text)) {
         diagnosticLog().event("provider", "request_result", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"text_length", std::to_string(text.size())},
@@ -307,9 +307,9 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     } else if (onE) {
         diagnosticLog().event("provider", "request_error", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
-            {"reason", "empty_result"}
+            {"reason", "no_speech"}
         });
-        onE("Qwen: empty result");
+        onE("Qwen: no speech");
     }
 }
 

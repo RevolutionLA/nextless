@@ -11,6 +11,12 @@
 
 namespace nextless {
 
+// FireRed 用 <sil> 这类控制记号(tokens.txt 里那 40 个非语音项)表示"这段不是语音"。
+// sherpa-onnx 会把它们原样带进结果文本, 直接上屏就是在用户文档里留下 "<sil>"。
+// 剥掉表里的记号; 剥完只剩空白就说明这段确实没说话, 按静音处理。
+// 只认表内的词, 用户真的在念代码时 "<int>" 这种内容不会被误删。
+void stripControlTokens(std::string &text);
+
 class FireRedAsrProvider : public IAsrProvider {
 public:
     FireRedAsrProvider();

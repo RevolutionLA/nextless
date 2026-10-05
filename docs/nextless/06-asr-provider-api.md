@@ -65,7 +65,16 @@ adapter                         AudioCapture                  ASR provider
 | `onResult` | `(text, isFinal)` | Recognized text. Current providers return final text; streaming providers may use `isFinal=false` for partial results. |
 | `onError` | `(error)` | Human-readable provider failure. |
 
-Recording state and status text belong to `AudioCapture`, not `IAsrProvider`.
+Silence is not a failure. A provider that heard no speech reports
+`"<Provider>: no speech"` (Doubao adds the word `recognized`), and the adapter
+recognises that wording through `nextless::isNoSpeechError()` — it resets the input
+panel and commits nothing instead of showing an error. Providers must route empty or
+whitespace-only model output down the same path (`nextless::isBlankAsrText()`), so a
+stray space never lands in the user's document.
+
+Recording state and status text belong to `AudioCapture`, not `IAsrProvider`. When VAD
+finds no speech in the whole recording, `AudioCapture` fires `setSilenceCallback()`
+instead of `onRecorded`, so no provider process or HTTP request is started.
 
 ## Registry
 

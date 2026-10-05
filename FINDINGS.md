@@ -755,3 +755,33 @@ OutputHandler 内部:
 #### 验证
 - `ninja -C build`：成功。
 - `meson test -C build`：3/3 通过。
+
+## 2026-10-05
+
+### 静音在两条后端上都不是 no-op
+
+#### 问题
+Roadmap 上 "Silence should be a no-op, not an `ASR error: empty result`" 的实际表现比描述更糟，两处都能复现：
+
+1. 用 `tools/uinput_key.cpp` 注入真实的右 Ctrl 长按 1.2s（环境静音、zenity 输入框聚焦）跑完整链路，日志：
+   - `loudness=-56.6 LUFS → gain=+107.6 dB`，底噪被放大到 `peak=28840`，VAD 于是判定 `HAS VOICE`（37/40 帧，92.5%），`isBlank=0`；
+   - 静音照样起了一个 sherpa-onnx 子进程（`exec_total=1373ms`），模型返回空文本，provider 报 `Zipformer: empty result`；
+   - adapter 按故障处理，在输入面板写 `Nextless: no speech recognized`，而这条状态没有任何清理时机，会一直挂到下一次按键。
+2. FireRed 后端更糟：对数字静音、-45 dBFS 底噪、-20 dBFS 白噪、440 Hz 单音、200ms 短噪声，`sherpa-onnx-offline` 一律返回 `text = "<sil>"`——非空、不是空白，因此会**原样上屏**，误按一次右 Ctrl 就在用户文档里留一个 `<sil>`。
+
+#### 已改动
+- `ASR_provider/src/asr_provider.h`：新增 `isNoSpeechError()` 与 `isBlankAsrText()`，把"没听见语音"从"故障"里分出来。
+- 四个 provider 的静音措辞统一为 `<名字>: no speech`（Zipformer/FireRed/Qwen 原来是 `empty result`，Doubao 本来就是 `no speech recognized`），诊断 reason 统一为 `no_speech`；结果判定改用 `isBlankAsrText()`，只剩空白的结果不再上屏。
+- `ASR_provider/src/fire_red_provider.cpp`：新增 `stripControlTokens()`，按模型 `tokens.txt` 里那 40 个非语音记号（`<sil>`、语言/方言标签等）逐个剥除。用表而不是"任何 `<小写>` 形状"，是为了保住真的在念代码时的 `vector<int>`。
+- `ASR_provider/src/audio_capture.{h,cpp}`：VAD 判空改走 `setSilenceCallback()`，不再借用状态文本回调发 `Nextless: no speech detected`。
+- `adapter/src/nextless.cpp`：静音（VAD 判空 or provider 报 no speech）一律把面板复位（`showStatus(target, "")`）后静默收尾；真故障的网络/超时/服务不可用文案不变。
+- 新增 `tests/test_no_speech.cpp`：钉住四个 provider 的静音措辞、真故障不被误判、空白文本判定，以及 `<sil>`/方言标签被剥掉而 `vector<int>` 不受影响。
+
+#### 验证
+- `meson test -C build`：10/10 通过。
+- provider 级（临时 harness，直接喂 wav）：FireRed 静音/底噪/白噪/单音/短噪声 5 例全部 `error="FireRed: no speech"`，`0.wav` 真实语音结果不变；Zipformer 静音报 no speech，`0.wav` 正常出文本。
+- 端到端：装好新库、`uinput_key 97 1200` 静音长按，日志走到 `Nextless ASR error: Zipformer: no speech`，无 commit、面板状态被清空。
+
+#### 未处理风险
+- VAD 跑在 EBU R128 归一化**之后**，所以安静房间的底噪会被 +107 dB 的增益抬成"有语音"，静音仍然白花一次进程调用（约 1.4s）。正确修法是对归一化前的信号做 VAD，或给增益设上限（例如 30 dB）。这条与降噪顺序纠缠，单独处理。
+- `Nextless: no audio captured` / `microphone read failed` 这类状态同样没有清理时机，只是它们本来就该被看见。

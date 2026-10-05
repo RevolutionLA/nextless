@@ -225,5 +225,5 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [ ] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）
 - [ ] `.deb` + CI（build × test 矩阵，让 `-Dwerror` 这类问题在发版前暴露）
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
-- [ ] 静音应当是 no-op，而不是 `ASR error: empty result`
+- [x] 静音是 no-op：不再报 `ASR error: empty result`，FireRed 的 `<sil>` 也不会进文档
 - [ ] 把代码里已经在调用、但仓库缺失的提示音补进来

@@ -10,8 +10,10 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <chrono>
+#include <string_view>
 #include <thread>
 #include <string>
 #include <vector>
@@ -24,6 +26,39 @@ static std::string expandPath(const std::string &p) {
         if (h) return std::string(h) + p.substr(1);
     }
     return p;
+}
+
+// FireRed 的控制记号: 模型 tokens.txt 里全部非语音项(静音、语言与方言标签)。
+// 只认这张表, 是为了保住用户真的在念代码时写下的 "<int>" 之类内容。
+constexpr std::array<std::string_view, 40> kFireRedMarkers = {
+    "<blank>", "<unk>", "<pad>", "<sos>", "<eos>", "<sil>",
+    "<unk_lang>", "<unk_lang2>", "<zh>", "<en>", "<zh_en>",
+    "<predict_lid>", "<not_predict_lid>",
+    "<xinan>", "<yue>", "<wu>", "<minnan>", "<p2>", "<p3>",
+    "<anhui>", "<fujian>", "<gansu>", "<guizhou>", "<hebei>", "<henan>",
+    "<hubei>", "<hunan>", "<jiangxi>", "<liaoning>", "<ningxia>",
+    "<shaanxi>", "<shandong>", "<shanghai>", "<shanxi>", "<sichuan>",
+    "<tianjin>", "<wenzhou>", "<yunnan>", "<guangdong>", "<hongkong>",
+};
+
+void stripControlTokens(std::string &text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size();) {
+        if (text[i] == '<') {
+            const auto end = text.find('>', i + 1);
+            if (end != std::string::npos && end - i <= 32) {
+                const std::string_view token(text.data() + i, end - i + 1);
+                if (std::find(kFireRedMarkers.begin(), kFireRedMarkers.end(), token) !=
+                    kFireRedMarkers.end()) {
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        out.push_back(text[i++]);
+    }
+    text = std::move(out);
 }
 
 FireRedAsrProvider::FireRedAsrProvider()
@@ -221,7 +256,8 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                 text.size());
 
         unlink(wav.c_str());
-        if (onR && !text.empty()) {
+        stripControlTokens(text);
+        if (onR && !isBlankAsrText(text)) {
             diagnosticLog().event("provider", "request_result", {
                 {"provider", "fire_red"},
                 {"recognition_id", std::to_string(diagnosticId)},
@@ -236,9 +272,9 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
             diagnosticLog().event("provider", "request_error", {
                 {"provider", "fire_red"},
                 {"recognition_id", std::to_string(diagnosticId)},
-                {"reason", "empty_result"}
+                {"reason", "no_speech"}
             });
-            onE("FireRed: empty result");
+            onE("FireRed: no speech");
         }
 }
 

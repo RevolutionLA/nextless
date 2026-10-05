@@ -378,7 +378,7 @@ void AudioCapture::recordLoop() {
                 {"voice", "false"}
             });
             unlink(wavPath_.c_str());
-            if (onStatusText_) onStatusText_("Nextless: no speech detected");
+            if (onSilence_) onSilence_();
         } else {
             unlink(wavPath_.c_str());
         }

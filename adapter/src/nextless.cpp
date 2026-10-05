@@ -655,6 +655,12 @@ private:
                 owner.outputHandler_->showStatus(target, text);
             });
         });
+        // 整段录音里没有语音: 什么都不上屏, 把面板上残留的状态清掉就好
+        audioCapture_->setSilenceCallback([callbackGate, target]() {
+            withOwner(callbackGate, [&](NextlessAddon &owner) {
+                owner.outputHandler_->showStatus(target, "");
+            });
+        });
 
         playSound("activate");
         audioCapture_->start();
@@ -783,15 +789,15 @@ private:
                 {"error_hash", diagnosticHash(error)}
             });
             std::string status = "Nextless: recognition failed";
-            if (error.find("network") != std::string::npos) {
+            if (nextless::isNoSpeechError(error)) {
+                // 没说话不是故障: 状态清空(面板复位), 什么都不上屏
+                status.clear();
+            } else if (error.find("network") != std::string::npos) {
                 status = "Nextless: network error; try again";
             } else if (error.find("timed out") != std::string::npos) {
                 status = "Nextless: recognition timed out; try again";
             } else if (error.find("service unavailable") != std::string::npos) {
                 status = "Nextless: recognition service unavailable; try again";
-            } else if (error.find("no speech") != std::string::npos ||
-                       error.find("empty result") != std::string::npos) {
-                status = "Nextless: no speech recognized";
             }
             withOwner(callbackGate, [&](NextlessAddon &owner) {
                 owner.outputHandler_->showStatus(target, status, [callbackGate] {

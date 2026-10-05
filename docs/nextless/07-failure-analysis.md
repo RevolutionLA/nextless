@@ -261,10 +261,10 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
    ```cpp
    else if (isBlank) {
        unlink(wavPath_.c_str());
-       if (onStatusText_) onStatusText_("Nextless: no speech detected");
+       if (onSilence_) onSilence_();
    }
    ```
-3. **`onRecorded_` 未被触发**，临时 WAV 文件被直接删除，请求根本未发向阿里或豆包。状态栏短暂提示后静默结束，没有任何文字上屏。
+3. **`onRecorded_` 未被触发**，临时 WAV 文件被直接删除，请求根本未发向阿里或豆包。宿主收到 silence 回调后把输入面板复位，静默结束，没有任何文字上屏（早于本次改动的行为是短暂显示 `Nextless: no speech detected`）。
 
 ---
 

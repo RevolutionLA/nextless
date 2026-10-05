@@ -13,6 +13,21 @@ namespace nextless {
 using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
 using AsrErrorCallback = std::function<void(const std::string &error)>;
 
+// 松手时其实没说话不算故障。各家 provider 用 "<名字>: no speech" 报告这种情况
+// ("empty result" 是历史写法, 保留兼容), adapter 据此把它当作无操作。
+inline bool isNoSpeechError(const std::string &error) {
+    return error.find("no speech") != std::string::npos ||
+           error.find("empty result") != std::string::npos;
+}
+
+// 静音时模型可能返回空串或只剩空白字符, 这种结果不该上屏。
+inline bool isBlankAsrText(const std::string &text) {
+    for (char c : text) {
+        if (static_cast<unsigned char>(c) > ' ') return false;
+    }
+    return true;
+}
+
 inline void joinAsrWorker(std::thread &worker) {
     if (!worker.joinable()) return;
     if (worker.get_id() == std::this_thread::get_id()) {

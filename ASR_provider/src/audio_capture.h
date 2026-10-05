@@ -16,6 +16,7 @@ public:
     using StateCallback = std::function<void(bool active)>;
     using StatusTextCallback = std::function<void(const std::string &)>;
     using RecordedCallback = std::function<void(const std::vector<int16_t>&, const std::string&)>;
+    using SilenceCallback = std::function<void()>;
 
     AudioCapture();
     ~AudioCapture();
@@ -33,6 +34,8 @@ public:
     void setStateCallback(StateCallback cb) { onState_ = std::move(cb); }
     void setStatusTextCallback(StatusTextCallback cb) { onStatusText_ = std::move(cb); }
     void setRecordedCallback(RecordedCallback cb) { onRecorded_ = std::move(cb); }
+    // VAD 判定整段录音里没有语音: 不送 provider、不算故障, 由宿主决定怎么收场
+    void setSilenceCallback(SilenceCallback cb) { onSilence_ = std::move(cb); }
     void setDiagnosticId(uint64_t id) { diagnosticId_ = id; }
 
     void setDenoiseMethod(const std::string &method) { denoiseMethod_ = method; }
@@ -69,6 +72,7 @@ private:
     StateCallback onState_;
     StatusTextCallback onStatusText_;
     RecordedCallback onRecorded_;
+    SilenceCallback onSilence_;
 };
 
 } // namespace nextless

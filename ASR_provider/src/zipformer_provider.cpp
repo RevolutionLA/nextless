@@ -223,7 +223,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                 text.size());
 
         unlink(wav.c_str());
-        if (onR && !text.empty()) {
+        if (onR && !isBlankAsrText(text)) {
             diagnosticLog().event("provider", "request_result", {
                 {"provider", "zipformer"},
                 {"recognition_id", std::to_string(diagnosticId)},
@@ -238,9 +238,9 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
             diagnosticLog().event("provider", "request_error", {
                 {"provider", "zipformer"},
                 {"recognition_id", std::to_string(diagnosticId)},
-                {"reason", "empty_result"}
+                {"reason", "no_speech"}
             });
-            onE("Zipformer: empty result");
+            onE("Zipformer: no speech");
         }
 }
 

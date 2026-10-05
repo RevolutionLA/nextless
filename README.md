@@ -51,8 +51,9 @@ clipboard round-trip, no focus stealing.
 - **Ordering you can trust.** You can start the next dictation while the previous one is still
   being recognised. Each result is bound to the window and input context that was focused when
   that recording started, and commits happen in recording order (up to three in flight).
-- **Errors stay out of your document.** Network, service, timeout, microphone and no-speech
-  failures appear as input-panel status text, never as inserted characters.
+- **Errors stay out of your document.** Network, service, timeout and microphone failures appear
+  as input-panel status text, never as inserted characters. Silence is a no-op: hold the key, say
+  nothing, release — nothing is committed and nothing is reported.
 
 ## Limitations (read before you install)
 
@@ -247,5 +248,5 @@ License: **MIT** — see [LICENSE](LICENSE), which retains the upstream copyrigh
 - [ ] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64)
 - [ ] `.deb` + CI (build × test matrix, so `-Dwerror` surprises surface before release)
 - [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
-- [ ] Silence should be a no-op, not an `ASR error: empty result`
+- [x] Silence is a no-op — no `ASR error: empty result`, and FireRed's `<sil>` never reaches the document
 - [ ] Ship the notification sounds the code already tries to play
