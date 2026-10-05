@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <linux/uinput.h>
 #include <string.h>
 #include <atomic>
@@ -258,6 +259,7 @@ private:
     std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> keyWatcher_;
     int uinputFd_ = -1;
     int revertDebounce_ = 0;            // uinput CapsLock 反弹去抖计数
+    std::vector<pid_t> soundPlayers_;   // 还没退出的提示音播放器
 
     // Output: encapsulates self-pipe and commit
     std::unique_ptr<nextless::OutputHandler> outputHandler_;
@@ -265,10 +267,11 @@ private:
     // 运行时依赖: notifications addon (仅用于切换显示)
     FCITX_ADDON_DEPENDENCY_LOADER(notifications, instance_->addonManager());
 
-    // 提示音: 用系统命令播放 WAV
-    static void playSound(const std::string &name) {
-        auto path = expandPath("~/.local/share/nextless/sounds/" + name + ".wav");
-        if (access(path.c_str(), R_OK) != 0) return;
+    // 提示音: 用户目录优先, 其次随包安装的 sounds 目录; 播放器先试 paplay 再试 pw-play
+    void playSound(const std::string &name) {
+        reapSoundPlayers();
+        const std::string path = findSound(name);
+        if (path.empty()) return;
 
         // paplay 需要 PULSE_RUNTIME_PATH 环境变量
         const char *pulsePath = getenv("PULSE_RUNTIME_PATH");
@@ -278,10 +281,40 @@ private:
         else if (xdgRuntime) paEnv = std::string("PULSE_RUNTIME_PATH=") + xdgRuntime + "/pulse";
 
         const char *envp[2] = {paEnv.empty() ? nullptr : paEnv.c_str(), nullptr};
-        pid_t pid;
-        const char *argv[] = {"paplay", path.c_str(), nullptr};
-        posix_spawn(&pid, "/usr/bin/paplay", nullptr, nullptr,
-                    (char *const *)argv, envp[0] ? (char *const *)envp : nullptr);
+        for (const char *player : {"paplay", "pw-play"}) {
+            const char *argv[] = {player, path.c_str(), nullptr};
+            pid_t pid;
+            if (posix_spawnp(&pid, player, nullptr, nullptr, (char *const *)argv,
+                             envp[0] ? (char *const *)envp : nullptr) != 0) {
+                continue;   // 这个播放器没装, 换下一个
+            }
+            soundPlayers_.push_back(pid);
+            return;
+        }
+    }
+
+    std::string findSound(const std::string &name) const {
+        const std::string file = name + ".wav";
+        std::vector<std::string> dirs = {
+            expandPath("~/.local/share/nextless/sounds"),
+#ifdef NEXTLESS_PACKAGED_SOUND_DIR
+            NEXTLESS_PACKAGED_SOUND_DIR,
+#endif
+        };
+        for (const auto &dir : dirs) {
+            std::string path = dir + "/" + file;
+            if (access(path.c_str(), R_OK) == 0) return path;
+        }
+        return {};
+    }
+
+    // 播放器是 fcitx5 的子进程。放音前非阻塞回收之前记下的那些，僵尸最多攒一两个。
+    // 只 waitpid 自己记的 pid，绝不装 SIGCHLD 处理器去抢 provider 那些 sherpa 子进程。
+    void reapSoundPlayers() {
+        std::erase_if(soundPlayers_, [](pid_t pid) {
+            int status = 0;
+            return waitpid(pid, &status, WNOHANG) != 0;
+        });
     }
 
     // 状态

@@ -7,6 +7,7 @@ This directory contains automated tests that run through Meson with no microphon
 - `test_asr_registry.cpp` verifies the ASR provider registry contract and the built-in `mock` provider.
 - `test_audio_capture_file.cpp` verifies the file-only audio processing path by generating a deterministic 16 kHz mono sample buffer, running the `none` denoiser path, and checking the WAV written by `AudioCapture`.
 - `test_buffer_detect_cache.cpp` verifies that the hardware buffer cache migrates the legacy single `buffer_bytes` field to the current PulseAudio source and keeps separate cached values for separate source ids.
+- `test_no_speech.cpp` verifies the silence contract: the wording every provider uses for "heard no speech", that real failures are not mistaken for silence, and that empty, whitespace-only or marker-only model output (`<sil>` and friends) never becomes committed text.
 - Hardware and desktop integration checks stay in `tools/` because they depend on PulseAudio devices, fcitx5, and a running compositor.
 
 ## Fixture Policy

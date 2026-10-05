@@ -41,9 +41,13 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
   一个 mock 用于自测。`Shift+触发键` 后按 ←/→ 换后端，↑/↓ 换降噪。
 - **完整的音频链路**，不是把麦克风原始数据直接丢给模型：PulseAudio 采集 → EBU R128 响度归一
   （−16 LUFS）→ speexdsp 或 DeepFilterNet 降噪 → VAD 静音裁剪，并保留一小段尾音，最后一个字不会被切掉。
+- **听得见的状态变化。** 起录、松手、换后端各有一声短提示，不用盯面板就知道键生效了。想换成自己的
+  音色，把 `activate.wav` / `deactivate.wav` / `switch.wav` 放进 `~/.local/share/nextless/sounds/`
+  即可；随包的三个音由 `tools/gen_sounds.py` 生成。
 - **顺序可靠。** 上一句还在识别时就能开始下一句。每次结果绑定“开始录音那一刻”的窗口与输入上下文，
   并按录音顺序上屏（最多 3 个在途）。
-- **报错不进正文。** 网络、服务、超时、麦克风、没说话，都只显示在光标旁的输入法状态面板里。
+- **报错不进正文。** 网络、服务、超时、麦克风故障都只显示在光标旁的输入法状态面板里。没说话就是
+  no-op：什么都不上屏，也不报错。
 
 ## 已知限制（装之前先看）
 
@@ -178,6 +182,7 @@ chmod 600 ~/.config/nextless/*.json
 | `~/.config/nextless/advanced.json` | 模型路径、`num_threads`、超时、LUFS 目标、VAD 阈值 |
 | `~/.config/nextless/doubao.json` / `qwen.json` | 云端凭据 |
 | `~/.config/nextless/pa_buffer.json` | 自动探测的 PulseAudio buffer（自生成） |
+| `~/.local/share/nextless/sounds/` | 覆盖随包的 `activate` / `deactivate` / `switch` 提示音（可选） |
 
 可从 `config/*.json.example` 复制起步。用户目录优先于 `/etc/nextless/`（打包的默认值），
 首次读取时缺失的用户配置会自动从 `/etc/nextless/` 拷一份，不会覆盖已有文件。
@@ -187,7 +192,7 @@ chmod 600 ~/.config/nextless/*.json
 ```bash
 meson setup build --buildtype=debug -Dwerror=false
 ninja -C build
-meson test -C build            # 9 个单测：注册表、配置回落、采集、队列、curl 取消
+meson test -C build            # 10 个单测：注册表、配置回落、采集、队列、静音、curl 取消
 ```
 
 - `docs/nextless/` —— 设计文档：交互模型、ASR provider 接口、失败场景分析。
@@ -226,4 +231,4 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [ ] `.deb` + CI（build × test 矩阵，让 `-Dwerror` 这类问题在发版前暴露）
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
 - [x] 静音是 no-op：不再报 `ASR error: empty result`，FireRed 的 `<sil>` 也不会进文档
-- [ ] 把代码里已经在调用、但仓库缺失的提示音补进来
+- [x] 提示音已随包附带（`tools/gen_sounds.py` 可重新生成）

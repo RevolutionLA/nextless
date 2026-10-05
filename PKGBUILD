@@ -10,7 +10,8 @@ url="https://github.com/RevolutionLA/nextless"
 license=('MIT')
 depends=('fcitx5' 'libebur128' 'libpulse' 'curl' 'speexdsp' 'libsoxr')
 makedepends=('git' 'meson' 'ninja')
-optdepends=('sherpa-onnx: local offline ASR backends (zipformer / fire-red)')
+optdepends=('sherpa-onnx: local offline ASR backends (zipformer / fire-red)'
+            'pulseaudio: paplay for the notification sounds (pw-play from pipewire works too)')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 install=PKGBUILD.install

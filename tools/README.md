@@ -43,6 +43,26 @@ Legacy tail-loss diagnosis utility for checking stop timing and long-read behavi
 
 Additional capture diagnostics used during audio troubleshooting.
 
+### `uinput_key`
+
+Inject a synthetic key press/hold/release through `/dev/uinput`, so push-to-talk can be self-tested without typing.
+
+```bash
+g++ -O1 tools/uinput_key.cpp -o /tmp/uinput_key && /tmp/uinput_key 97 1200
+```
+
+`97` is `KEY_RIGHTCTRL`; hold long enough (default activation threshold 300 ms) to start a recording.
+
+### `gen_sounds.py`
+
+Regenerate the bundled notification sounds into `sounds/` after changing pitch, length or level. The generated files are committed — Meson installs them and the adapter plays the first of `paplay` / `pw-play` it finds.
+
+```bash
+python3 tools/gen_sounds.py
+```
+
+Put a file of the same name in `~/.local/share/nextless/sounds/` to override one sound without rebuilding.
+
 ## Rule of Thumb
 
 If a tool needs a microphone, a compositor, or an external binary/model, keep it here as a manual helper. If it can run without hardware or network, move it into `tests/` and register it with Meson `test()`.
