@@ -79,7 +79,10 @@ int main() {
         if (client < 0) return;
         serverReady.store(true);
         char request[1024];
-        (void)read(client, request, sizeof(request));
+        // 只是为了把客户端的请求读干，好让服务端停在"已连接但迟迟不返回"的状态；
+        // 读到多少字节无所谓，但 read() 带 warn_unused_result，必须显式接住返回值。
+        const ssize_t received = read(client, request, sizeof(request));
+        (void)received;
         std::this_thread::sleep_for(std::chrono::seconds(3));
         close(client);
     });
