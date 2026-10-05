@@ -15,6 +15,13 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- The packaged default configs are installed for real now: `meson install` ships the five
+  `config/*.json.example` files, renamed to `*.json`, into the build's `sysconfdir`/nextless —
+  `/etc/nextless` for distro builds (the PKGBUILD passes `--sysconfdir=/etc`), `/usr/local/etc/nextless`
+  for a plain source install — and the loader reads that same path, compiled in as
+  `NEXTLESS_PACKAGED_CONFIG_DIR`. Before this, the loader read a hardcoded `/etc/nextless` that no
+  source install ever populated, so the examples were repository decoration. The PKGBUILD's own
+  `/etc` install loop is gone; `backup=...` still protects local edits during upgrades.
 - The temporary WAV of an utterance is now deleted *before* the result/error callback fires, in all
   four providers (`temp_wav.h`). Previously the deletion lived in a scope guard, so "the callback
   fired" no longer implied "the file is gone" — `cloud_provider_queue` failed intermittently in CI's
