@@ -33,7 +33,10 @@ pkgver() {
 
 build() {
     cd "$_pkgname"
-    meson setup build --prefix=/usr --buildtype=plain -Dcpp_args='-O2 -march=native'
+    # --sysconfdir=/etc：默认配置装到 /etc/nextless（meson 规则），
+    # 并由同一路径编译进 loader；backup=(...) 仍然对 pacman 生效。
+    meson setup build --prefix=/usr --sysconfdir=/etc --buildtype=plain \
+        -Dcpp_args='-O2 -march=native'
     meson compile -C build
 }
 
@@ -43,9 +46,6 @@ package() {
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
     for f in config/*.json.example; do
-        name=${f##*/}
-        name=${name%.example}
-        install -Dm644 "$f" "$pkgdir/etc/nextless/$name"
         install -Dm644 "$f" "$pkgdir/usr/share/doc/$_pkgname/$f"
     done
 }

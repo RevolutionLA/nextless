@@ -32,8 +32,16 @@ inline std::string configPath(const std::string &name) {
     return configDir() + "/" + name;
 }
 
+// 打包默认配置目录。meson 在编译期注入实际安装位置（sysconfdir/nextless：
+// 发行版构建即 /etc/nextless，本地源码安装是 /usr/local/etc/nextless），
+// 保证 loader 读的目录和 `meson install` 写入的目录永远是同一个。
+// 未走 meson 构建时（例如手工编译单个测试）退回历史上的 /etc/nextless。
+#ifndef NEXTLESS_PACKAGED_CONFIG_DIR
+#define NEXTLESS_PACKAGED_CONFIG_DIR "/etc/nextless"
+#endif
+
 inline std::string systemConfigDir() {
-    return "/etc/nextless";
+    return NEXTLESS_PACKAGED_CONFIG_DIR;
 }
 
 inline std::string readFileIfExists(const std::string &path) {

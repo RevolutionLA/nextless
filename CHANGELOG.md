@@ -24,6 +24,19 @@ user-visible change rather than one per commit.
   (`test_missing_components`) covers all four provider failure paths plus the panel mapping. A
   non-zero child exit also logs the first line the child printed, so a corrupt model is not
   silent either.
+- `config/advanced.json.example` no longer contradicts the built-in defaults it shadows: the
+  zipformer `model_dir` pointed at `.../models/zipformer-zh-en`, a directory no download step
+  creates (the README unpacks `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20`), and
+  both sections pinned `num_threads` back to the old hardcoded 30. Now that the build installs
+  these files and the loader copies them into `~/.config/nextless/` on first read, a wrong value
+  here would silently override the fix.
+- The packaged default configs are installed for real now: `meson install` ships the five
+  `config/*.json.example` files, renamed to `*.json`, into the build's `sysconfdir`/nextless —
+  `/etc/nextless` for distro builds (the PKGBUILD passes `--sysconfdir=/etc`), `/usr/local/etc/nextless`
+  for a plain source install — and the loader reads that same path, compiled in as
+  `NEXTLESS_PACKAGED_CONFIG_DIR`. Before this, the loader read a hardcoded `/etc/nextless` that no
+  source install ever populated, so the examples were repository decoration. The PKGBUILD's own
+  `/etc` install loop is gone; `backup=...` still protects local edits during upgrades.
 - The temporary WAV of an utterance is now deleted *before* the result/error callback fires, in all
   four providers (`temp_wav.h`). Previously the deletion lived in a scope guard, so "the callback
   fired" no longer implied "the file is gone" — `cloud_provider_queue` failed intermittently in CI's
