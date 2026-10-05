@@ -8,6 +8,7 @@
 #include <fcitx/inputpanel.h>       // InputPanel, setClientPreedit
 #include <fcitx/inputcontextmanager.h>  // findByUUID
 #include <fcitx-config/configuration.h>   // FCITX_CONFIGURATION
+#include <fcitx-config/option.h>          // KeyListOption（可绑定纯修饰键）
 #include <fcitx-config/iniparser.h>       // readAsIni, safeSaveAsIni
 #include <fcitx-utils/i18n.h>             // _() translation macro
 #include <fcitx-utils/event.h>     // EventLoop, addTimeEvent
@@ -64,6 +65,13 @@ static std::string diagnosticHash(std::string_view value) {
 // 配置: 定义 addon 的可配置选项
 FCITX_CONFIGURATION(
     VinputConfig,
+    fcitx::KeyListOption hotkey{
+        this,
+        "Hotkey",
+        _("Push-to-talk key (hold to speak, release to finish)"),
+        {fcitx::Key("Control_R")},
+        fcitx::KeyListConstrain({fcitx::KeyConstrainFlag::AllowModifierOnly,
+                                 fcitx::KeyConstrainFlag::AllowModifierLess})};
     fcitx::Option<std::string> defaultProvider{
         this, "DefaultProvider", _("Default ASR Provider"), "zipformer"};
 );
@@ -143,6 +151,8 @@ public:
     // 配置读写
     void reloadConfig() override {
         readAsIni(config_, confFile);
+        FCITX_INFO() << "Vinput: hotkeys " << hotkeyToString()
+                     << ", provider " << config_.defaultProvider.value();
     }
     const fcitx::Configuration *getConfig() const override {
         return &config_;
@@ -150,6 +160,10 @@ public:
     void setConfig(const fcitx::RawConfig &config) override {
         config_.load(config, true);
         safeSaveAsIni(config_, confFile);
+        // 换键立即生效（onKeyEvent 每次读 config_）；只有从别的键换成
+        // CapsLock 时才需要额外的 uinput 反弹设备，那种情况重启一次 fcitx5。
+        if (triggerNeedsRevert() && uinputFd_ < 0) initUinput();
+        FCITX_INFO() << "Vinput: hotkeys now " << hotkeyToString();
     }
 
 private:
@@ -158,8 +172,43 @@ private:
     int notificationTimeout_ = 2000;         // from vinput.json: notification_timeout
     int debounceCount_ = 2;                   // from vinput.json: debounce_count
 
+    // ---- 触发键判定（可配置，支持纯修饰键）----
+    // 修饰键（左/右 Ctrl、Alt、Shift、Super）的 press 事件里 states 已经带上了
+    // 自身和其它修饰键，所以只能比 sym；普通键走 check()（要求修饰键组合一致）。
+    bool isTriggerPress(const fcitx::KeyEvent &keyEvent) const {
+        const fcitx::Key &key = keyEvent.key();
+        for (const fcitx::Key &k : *config_.hotkey) {
+            if (k.isModifier() ? key.sym() == k.sym() : key.check(k)) return true;
+        }
+        return false;
+    }
+    // release 事件里修饰键状态已经在变，比 sym 就够
+    bool isTriggerRelease(const fcitx::KeyEvent &keyEvent) const {
+        const fcitx::Key &key = keyEvent.key();
+        for (const fcitx::Key &k : *config_.hotkey) {
+            if (key.sym() == k.sym()) return true;
+        }
+        return false;
+    }
+    // 只有 CapsLock 这类"锁定键"当触发键时才需要 uinput 反弹还原；
+    // 换成普通修饰键后没有锁定状态要还原，整套 uinput hack 直接不启用。
+    bool triggerNeedsRevert() const {
+        for (const fcitx::Key &k : *config_.hotkey) {
+            if (k.sym() == FcitxKey_Caps_Lock) return true;
+        }
+        return false;
+    }
+    std::string hotkeyToString() const {
+        return fcitx::Key::keyListToString(*config_.hotkey);
+    }
+
     // 创建常驻 uinput 虚拟键盘设备, 用于还原 CapsLock
     void initUinput() {
+        if (!triggerNeedsRevert()) {
+            FCITX_INFO() << "Vinput: trigger key is " << hotkeyToString()
+                         << ", no locking-key revert needed (uinput disabled)";
+            return;
+        }
         uinputFd_ = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
         if (uinputFd_ < 0) {
             FCITX_INFO() << "Vinput: cannot open /dev/uinput";
@@ -346,15 +395,19 @@ private:
 
     // 键盘事件回调
     void onKeyEvent(fcitx::KeyEvent &keyEvent) {
-        bool capsLock = (keyEvent.key().sym() == FcitxKey_Caps_Lock);
+        // 触发键可配置（默认右 Ctrl）；press 与 release 的匹配方式不同
+        const bool trigger = keyEvent.isRelease()
+            ? isTriggerRelease(keyEvent)
+            : isTriggerPress(keyEvent);
 
-        // 放行 CapsLock; 切换模式或录音中放行所有键
-        if (!capsLock && !active_ && !switchActive_ && !timer_) return;
+        // 放行触发键; 切换模式或录音中放行所有键
+        if (!trigger && !active_ && !switchActive_ && !timer_) return;
 
         if (keyEvent.isRelease()) {
-            if (capsLock) {
-                vinput::diagnosticLog().event("input", "capslock_release", {
+            if (trigger) {
+                vinput::diagnosticLog().event("input", "trigger_release", {
                     {"recognition_id", std::to_string(currentRecognitionId_)},
+                    {"hotkey", hotkeyToString()},
                     {"active", active_ ? "true" : "false"},
                     {"switch_active", switchActive_ ? "true" : "false"},
                     {"timer", timer_ ? "true" : "false"},
@@ -368,21 +421,26 @@ private:
                     onDeactivate();
                 } else if (switchActive_) {
                     switchActive_ = false;
-                    revertDebounce_ = debounceCount_;
+                    revertDebounce_ = triggerNeedsRevert() ? debounceCount_ : 0;
                     playSound("deactivate");
                     revertCapsLock();
                 } else {
                     timer_.reset();
                 }
-                keyEvent.filterAndAccept();
+                // 只有 CapsLock（锁定键）必须被吞掉，否则大写锁会被真切下去；
+                // 普通修饰键触发键不吞，右 Ctrl 仍然可以正常当 Ctrl 用。
+                if (keyEvent.key().sym() == FcitxKey_Caps_Lock) {
+                    keyEvent.filterAndAccept();
+                }
             }
             return;
         }
 
         // ---- 按下事件 ----
-        if (capsLock) {
-            vinput::diagnosticLog().event("input", "capslock_press", {
+        if (trigger) {
+            vinput::diagnosticLog().event("input", "trigger_press", {
                 {"recognition_id", std::to_string(currentRecognitionId_)},
+                {"hotkey", hotkeyToString()},
                 {"active", active_ ? "true" : "false"},
                 {"switch_active", switchActive_ ? "true" : "false"},
                 {"timer", timer_ ? "true" : "false"},
@@ -404,10 +462,15 @@ private:
                 FCITX_INFO() << "Vinput [press] no input context";
             }
 
-            bool ctrlHeld = (keyEvent.key().states().toInteger() & (uint32_t)fcitx::KeyState::Ctrl) != 0;
+            uint32_t states = (uint32_t)keyEvent.key().states().toInteger();
+            bool shiftHeld = (states & (uint32_t)fcitx::KeyState::Shift) != 0;
+            bool ctrlHeld = (states & (uint32_t)fcitx::KeyState::Ctrl) != 0;
+            // 进入切换模式的组合键：Shift+触发键；若触发键仍是 CapsLock，
+            // 兼容老用户的习惯（Ctrl+CapsLock）
+            bool switchCombo = shiftHeld || (triggerNeedsRevert() && ctrlHeld);
 
-            if (ctrlHeld) {
-                // Ctrl+CapsLock: 进入切换模式 (不启用录音)
+            if (switchCombo) {
+                // 组合键: 进入切换模式 (不启用录音)
                 switchActive_ = true;
                 FCITX_INFO() << "Vinput switch mode active";
 
@@ -428,7 +491,7 @@ private:
                         std::vector<std::string>{}, notificationTimeout_, nullptr, nullptr);
                 }
             } else {
-                // 普通 CapsLock: 启动长按计时器
+                // 单独按住触发键: 启动长按计时器
                 timer_ = instance_->eventLoop().addTimeEvent(
                     CLOCK_MONOTONIC,
                     fcitx::now(CLOCK_MONOTONIC) + activationUsec_, 0,
@@ -437,7 +500,11 @@ private:
                         return false;
                     });
             }
-            keyEvent.filterAndAccept();
+            // CapsLock 必须吞掉，否则大写锁定状态被真切下去；切换模式的组合键也吞。
+            // 普通修饰键（默认右 Ctrl）不吞 —— 按住它照常打字、照常做 Ctrl+组合键。
+            if (keyEvent.key().sym() == FcitxKey_Caps_Lock || switchCombo) {
+                keyEvent.filterAndAccept();
+            }
             return;
         }
 
@@ -790,8 +857,8 @@ private:
 
         playSound("deactivate");  // 结束音: 低音
 
-        // 松键后还原 CapsLock (按下时硬件层已切换, 现在补一个假按键还原)
-        revertDebounce_ = debounceCount_;
+        // 仅当触发键是 CapsLock 时才需要补一个假按键还原锁定状态
+        revertDebounce_ = triggerNeedsRevert() ? debounceCount_ : 0;
         revertCapsLock();
     }
 
