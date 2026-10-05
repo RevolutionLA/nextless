@@ -142,24 +142,29 @@ static std::string secureCaptureDir() {
     return cached;
 }
 
-// 删除 dirPath 里所有 nextless_cap_*.wav；返回是否删掉了至少一个文件。
+// 删除 dirPath 里所有 nextless_cap_*.wav。每个 filesystem 调用用独立的
+// error_code —— 曾共享一个 ec 并在循环顶部 `if (ec) break`，一次预期内
+// 的失败（比如 remove 非空目录）会把后续所有扫描连带中止。
 static bool sweepWavsIn(const std::filesystem::path &dirPath) {
     std::error_code ec;
-    bool removed = false;
-    for (const auto &entry : std::filesystem::directory_iterator(dirPath, ec)) {
-        if (ec) break;
+    std::vector<std::filesystem::path> files;
+    for (std::filesystem::directory_iterator it(dirPath, ec), end;
+         !ec && it != end; it.increment(ec)) {
         std::error_code fec;
-        if (!entry.is_regular_file(fec) || fec) continue;
-        auto filename = entry.path().filename().string();
+        if (!it->is_regular_file(fec) || fec) continue;
+        files.push_back(it->path());
+    }
+    bool removed = false;
+    for (const auto &p : files) {
+        auto filename = p.filename().string();
         // 匹配 nextless_cap_<pid>_<n>.wav 模式
-        if (filename.rfind("nextless_cap_", 0) == 0 &&
-            filename.size() > 13 &&
-            filename.substr(filename.size() - 4) == ".wav") {
-            std::filesystem::remove(entry.path(), ec);
-            if (!ec) {
-                removed = true;
-                fprintf(stderr, "Nextless Capture: swept orphaned WAV %s\n", filename.c_str());
-            }
+        if (filename.rfind("nextless_cap_", 0) != 0 ||
+            filename.size() <= 13 ||
+            filename.substr(filename.size() - 4) != ".wav") continue;
+        std::error_code rec;
+        if (std::filesystem::remove(p, rec) && !rec) {
+            removed = true;
+            fprintf(stderr, "Nextless Capture: swept orphaned WAV %s\n", filename.c_str());
         }
     }
     return removed;
@@ -178,44 +183,63 @@ static void sweepOrphanedWavs(const std::string &dir) {
 
     std::error_code ec;
     auto current = std::filesystem::weakly_canonical(dir, ec);
-    if (ec) current = std::filesystem::path(dir);
+    if (ec) {
+        ec.clear();
+        current = std::filesystem::path(dir);
+    }
 
     // 当前目录：固定路径模式下崩溃残留就落在这里，无条件清理。
     sweepWavsIn(current);
 
+    // 先快照兄弟目录名再处理：边迭代边删除会让部分文件系统上的
+    // 目录游标行为不可靠。
     auto parent = current.parent_path();
-    for (const auto &entry : std::filesystem::directory_iterator(parent, ec)) {
-        if (ec) break;
+    std::vector<std::filesystem::path> siblings;
+    for (std::filesystem::directory_iterator it(parent, ec), end;
+         !ec && it != end; it.increment(ec)) {
         std::error_code dec;
-        if (!entry.is_directory(dec) || dec) continue;
-        auto name = entry.path().filename().string();
+        if (!it->is_directory(dec) || dec) continue;
+        auto name = it->path().filename().string();
         if (name.rfind("nextless", 0) != 0) continue;
-        auto sibling = std::filesystem::weakly_canonical(entry.path(), ec);
-        if (ec) sibling = entry.path();
+        siblings.push_back(it->path());
+    }
+
+    for (const auto &raw : siblings) {
+        std::error_code nec;
+        auto sibling = std::filesystem::weakly_canonical(raw, nec);
+        if (nec) sibling = raw;
         if (sibling == current) continue;
 
         // 兄弟目录：只清理足够"陈旧"的文件，避开并发会话的活动录音。
-        for (const auto &f : std::filesystem::directory_iterator(sibling, ec)) {
-            if (ec) break;
-            std::error_code fec;
-            if (!f.is_regular_file(fec) || fec) continue;
-            auto filename = f.path().filename().string();
+        std::vector<std::filesystem::path> files;
+        std::error_code fec;
+        for (std::filesystem::directory_iterator it(sibling, fec), end;
+             !fec && it != end; it.increment(fec)) {
+            std::error_code tec;
+            if (!it->is_regular_file(tec) || tec) continue;
+            files.push_back(it->path());
+        }
+        for (const auto &f : files) {
+            auto filename = f.filename().string();
             if (filename.rfind("nextless_cap_", 0) != 0 ||
                 filename.size() <= 13 ||
                 filename.substr(filename.size() - 4) != ".wav") continue;
-            auto mtime = std::filesystem::last_write_time(f.path(), ec);
-            if (ec) continue;
+            std::error_code mec;
+            auto mtime = std::filesystem::last_write_time(f, mec);
+            if (mec) continue;
             auto age = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::file_clock::now() - mtime).count();
             if (age < kOrphanMaxAgeSec) continue;
-            std::filesystem::remove(f.path(), ec);
-            if (!ec) {
+            std::error_code rec;
+            if (std::filesystem::remove(f, rec) && !rec) {
                 fprintf(stderr, "Nextless Capture: swept orphaned WAV %s/%s\n",
-                        name.c_str(), filename.c_str());
+                        sibling.filename().string().c_str(), filename.c_str());
             }
         }
-        // 目录变空了就收掉；非空（别的会话还在用）remove 会失败，忽略即可。
-        std::filesystem::remove(sibling, ec);
+        // 目录变空了就收掉；非空（别的会话还在用）remove 失败属预期，
+        // 独立 ec，不影响后面的兄弟目录。
+        std::error_code rec;
+        std::filesystem::remove(sibling, rec);
     }
 }
 

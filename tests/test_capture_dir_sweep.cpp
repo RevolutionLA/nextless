@@ -3,6 +3,12 @@
 // start(), and the crash sweep must actually reach orphan files that live in
 // OLD random /tmp/nextless_* dirs. Runs headless: start() only needs to set
 // the WAV path and spawn the thread; no PulseAudio server required.
+//
+// Two planted dirs reproduce the CI flake found in the first cut of the fix:
+// a FRESH recording in a live sibling dir must survive the sweep (age guard),
+// AND that non-empty sibling must not abort the scan before the OLD orphan
+// dir is reached (a shared error_code + `if (ec) break` did exactly that on
+// GitHub runners, where /tmp holds leftover dirs from parallel test binaries).
 #include "audio_capture.h"
 
 #include <chrono>
@@ -25,51 +31,50 @@ static void check(const std::string &what, bool ok) {
     ++failures;
 }
 
-static int countNextlessTmpDirs() {
+struct Planted {
+    fs::path dir;
+    fs::path wav;
+};
+
+static Planted plantDir(const std::string &kind, const std::string &stamp,
+                        bool backdate) {
     std::error_code ec;
-    int n = 0;
-    for (const auto &entry : fs::directory_iterator("/tmp", ec)) {
-        if (ec) break;
-        std::error_code dec;
-        if (!entry.is_directory(dec) && !dec) continue;
-        auto name = entry.path().filename().string();
-        if (name.rfind("nextless_", 0) == 0) n++;
+    Planted p;
+    p.dir = fs::path("/tmp") / ("nextless_" + kind + "_" + stamp);
+    fs::remove_all(p.dir, ec);
+    fs::create_directories(p.dir);
+    // Pattern check is on the prefix, so the stamp suffix is fine.
+    p.wav = p.dir / ("nextless_cap_9999_1_" + stamp + ".wav");
+    std::ofstream f(p.wav);
+    f << "residue";
+    f.close();
+    if (backdate) {
+        auto oldTime = fs::last_write_time(p.wav) - std::chrono::hours(1);
+        fs::last_write_time(p.wav, oldTime);
     }
-    return n;
+    return p;
 }
 
 int main() {
     // Force the /tmp fallback branch for this process.
     unsetenv("XDG_RUNTIME_DIR");
 
-    // Plant a fake crashed session: old random dir with an old orphan WAV.
-    // The sweep ignores files younger than 10 minutes (live recordings from
-    // concurrent sessions), so backdate the mtime by an hour.
     auto stamp = std::to_string(getpid());
-    auto orphanDir = fs::path("/tmp") / ("nextless_orphan_" + stamp);
-    std::error_code ec;
-    fs::remove_all(orphanDir, ec);
-    fs::create_directories(orphanDir);
-    auto orphanWav = orphanDir / ("nextless_cap_9999_1_" + stamp + ".wav");
-    // Pattern check is on the prefix, so the stamp suffix is fine.
-    {
-        std::ofstream f(orphanWav);
-        f << "crash residue";
-    }
-    auto oldTime = fs::last_write_time(orphanWav) - std::chrono::hours(1);
-    fs::last_write_time(orphanWav, oldTime);
-
-    int dirsBefore = countNextlessTmpDirs();
+    // Old crash residue: must be swept (file gone, then the empty dir rmdir'd).
+    auto old = plantDir("orphan", stamp, /*backdate=*/true);
+    // Live sibling with a fresh file: must be left completely alone.
+    auto live = plantDir("live", stamp, /*backdate=*/false);
 
     nextless::AudioCapture capture;
 
-    // The planted orphan (file + dir) must be gone after the startup sweep.
-    check("planted orphan WAV was not swept", !fs::exists(orphanWav));
-    check("planted orphan dir was not removed", !fs::exists(orphanDir));
+    check("planted orphan WAV was not swept", !fs::exists(old.wav));
+    check("planted orphan dir was not removed", !fs::exists(old.dir));
+    check("sweep killed a concurrent session's fresh recording",
+          fs::exists(live.wav));
 
     // Three full capture cycles must reuse ONE directory (was: mkdtemp per
     // start() leaked one dir per utterance).
-    std::string parent1, parent2, parent3;
+    std::string parent;
     for (int i = 0; i < 3; i++) {
         capture.start();
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
@@ -78,24 +83,21 @@ int main() {
         const auto &wp = capture.wavPath();
         check("wavPath empty after start cycle " + std::to_string(i), !wp.empty());
         auto pos = wp.rfind('/');
-        std::string parent = pos == std::string::npos ? "" : wp.substr(0, pos);
-        check("capture dir not under /tmp/nextless_*: " + parent,
-              parent.rfind("/tmp/nextless_", 0) == 0);
-        if (i == 0) parent1 = parent;
-        if (i == 1) parent2 = parent;
-        if (i == 2) parent3 = parent;
+        std::string p = pos == std::string::npos ? "" : wp.substr(0, pos);
+        check("capture dir not under /tmp/nextless_*: " + p,
+              p.rfind("/tmp/nextless_", 0) == 0);
+        if (i == 0) parent = p;
+        else check("capture cycles leaked a new directory per utterance", p == parent);
     }
-    check("capture cycles leaked a new directory per utterance",
-          parent1 == parent2 && parent2 == parent3);
 
-    int dirsAfter = countNextlessTmpDirs();
-    // Our process created at most one dir; siblings from parallel test
-    // binaries may exist, so assert the DELTA of dirs we might have added is
-    // 1 rather than an absolute count. (parent1 is ours and persists.)
-    check("expected at most one new /tmp/nextless_* dir from 3 cycles",
-          dirsAfter - dirsBefore <= 1);
+    // The live dir must still exist (non-empty dirs are never removed).
+    check("non-empty sibling dir was removed", fs::exists(live.dir));
 
-    // Clean up our session dir so repeated runs do not accumulate.
-    fs::remove_all(parent1, ec);
+    // Clean up planted dirs and our session dir so repeated runs do not
+    // accumulate.
+    std::error_code ec;
+    fs::remove_all(live.dir, ec);
+    fs::remove_all(old.dir, ec);
+    fs::remove_all(parent, ec);
     return failures == 0 ? 0 : 1;
 }
