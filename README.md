@@ -1,5 +1,10 @@
 # Nextless
 
+[![CI](https://github.com/RevolutionLA/nextless/actions/workflows/ci.yml/badge.svg)](https://github.com/RevolutionLA/nextless/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/RevolutionLA/nextless)](https://github.com/RevolutionLA/nextless/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![en · zh](https://img.shields.io/badge/docs-en%20%C2%B7%20zh-blue)](README.zh.md)
+
 **Push-to-talk voice input for fcitx5 — hold a key, speak, release, and the text lands at your cursor.**
 
 Nextless is a [Typeless](https://www.typeless.io)-style dictation tool for Linux desktops
@@ -8,7 +13,8 @@ Nextless is a [Typeless](https://www.typeless.io)-style dictation tool for Linux
 **the trigger key is yours to choose** — including bare modifiers like Right Ctrl —
 and nothing else about your keyboard behaviour changes.
 
-[中文说明](README.zh.md) · [Roadmap](#roadmap) · [Attribution](#attribution)
+[中文说明](README.zh.md) · [Roadmap](#roadmap) · [Contributing](CONTRIBUTING.md) ·
+[Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Attribution](#attribution)
 
 ```
    hold Right Ctrl        speak         release
@@ -82,11 +88,13 @@ clipboard round-trip, no focus stealing.
 ### 1. Build
 
 ```bash
-# Debian / Ubuntu (package names verified on Ubuntu 26.04)
+# Debian / Ubuntu
 sudo apt install -y g++ meson ninja-build git \
   libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
   libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
-# Debian ships the four fcitx5 dev packages above as one meta package: sudo apt install libfcitx5-dev
+# Package names above verified with apt-cache on Ubuntu 26.04. There is no libfcitx5-dev
+# meta package in the Ubuntu archive; Debian testing/sid names look the same but are
+# unverified — please open an issue if they differ.
 # Fedora: dnf install gcc-c++ meson ninja-build pkgconf-pkg-config fcitx5-devel libpulse-devel \
 #         libebur128-devel libcurl-devel speexdsp-devel soxr-devel   (not CI-verified yet)
 
@@ -97,8 +105,9 @@ ninja -C build
 sudo meson install -C build
 ```
 
-> On GCC 15 the strict default (`-Dwerror=true`) can trip on a `-Wunused-result` in a test
-> helper. Either `meson configure build -Dwerror=false` or build with `-Dbuildtype=debugoptimized`.
+> `meson.build` sets `warning_level=3` and `werror=true`, and CI builds with exactly that, so a
+> compiler warning fails the build. Locally you can drop it with
+> `meson configure build -Dwerror=false` while experimenting.
 
 Arch users can build the provided `PKGBUILD` instead: `makepkg -si` (produces
 `fcitx5-nextless-git`).
@@ -131,7 +140,7 @@ fcitx5 -r -d
 ### 4. Get models (local backends)
 
 ```bash
-mkdir -p ~/.local/share/nextless
+mkdir -p ~/.local/share/nextless/sherpa-onnx ~/.local/share/nextless/models
 cd /tmp
 
 # sherpa-onnx runtime (shared build: copy bin/ *and* lib/ — the binaries use rpath $ORIGIN/../lib)
@@ -235,10 +244,13 @@ Copy the `config/*.json.example` files as a starting point. User files win over 
 ## Development
 
 ```bash
-meson setup build --buildtype=debug -Dwerror=false
+meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 10 unit tests: registry, config fallback, capture, queue, silence, cancellation
+meson test -C build            # 11 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise
 ```
+
+Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner
+`pulseaudio --start` plus `pactl load-module module-null-sink` is enough — that is what CI does.
 
 - `docs/nextless/` — design notes: interaction model, ASR provider API, failure analysis.
 - `docs/fcitx5/` — a short primer on the fcitx5 add-on and configuration system, since Nextless
@@ -273,11 +285,17 @@ License: **MIT** — see [LICENSE](LICENSE), which retains the upstream copyrigh
 
 ## Roadmap
 
+Active work is tracked as [GitHub Issues](https://github.com/RevolutionLA/nextless/issues);
+the list below is the direction, not the queue.
+
 - [ ] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
 - [ ] Hotwords / custom phrases for the local backends
 - [ ] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64)
-- [ ] `.deb` + CI (build × test matrix, so `-Dwerror` surprises surface before release)
+- [ ] `.deb` packaging (and `fcitx5-nextless` in the AUR)
 - [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
+- [ ] Voice cloning / per-user correction learning — undecided, see the discussion thread first
+- [x] CI: build × test matrix on GCC with `-Dwerror=true`, plus a diagnostics build
 - [x] Silence is a no-op — no `ASR error: empty result`, and FireRed's `<sil>` never reaches the document
 - [x] Notification sounds ship with the package (`tools/gen_sounds.py` regenerates them)
 - [x] DeepFilterNet3 as an opt-in denoiser, with a bounded subprocess and a speexdsp fallback
+- [x] Chinese documentation (`README.zh.md`)

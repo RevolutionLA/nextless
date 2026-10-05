@@ -1,5 +1,10 @@
 # Nextless（中文）
 
+[![CI](https://github.com/RevolutionLA/nextless/actions/workflows/ci.yml/badge.svg)](https://github.com/RevolutionLA/nextless/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/RevolutionLA/nextless)](https://github.com/RevolutionLA/nextless/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![en · zh](https://img.shields.io/badge/docs-en%20%C2%B7%20zh-blue)](README.md)
+
 **fcitx5 的按住说话语音输入 —— 按住一个键、说话、松手，文字直接落在光标处。**
 
 Nextless 是 Linux 桌面版的 Typeless 式听写工具（Wayland 与 X11 都可用），以 fcitx5 原生插件的
@@ -7,6 +12,9 @@ Nextless 是 Linux 桌面版的 Typeless 式听写工具（Wayland 与 X11 都�
 **触发键由你自己定**——包括右 Ctrl 这类纯修饰键——并且不改变键盘的任何其它行为。
 
 English README: [README.md](README.md)
+
+[后续计划](#后续计划) · [贡献指南](CONTRIBUTING.md) · [变更记录](CHANGELOG.md) ·
+[安全说明](SECURITY.md) · [归属](#归属)
 
 ```
    按住右 Ctrl         说话          松手
@@ -69,10 +77,15 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 ### 1. 构建
 
 ```bash
-# Debian / Ubuntu（包名已在 Ubuntu 26.04 验证）
+# Debian / Ubuntu
 sudo apt install -y g++ meson ninja-build git \
   libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
   libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+
+# 上面的包名在 Ubuntu 26.04 上用 apt-cache 逐个查过；Ubuntu 源里没有 libfcitx5-dev
+# 这个元包。Debian 的包名看起来一样但未经实机验证，如果有出入欢迎提 issue。
+# Fedora：dnf install gcc-c++ meson ninja-build pkgconf-pkg-config fcitx5-devel libpulse-devel \
+#         libebur128-devel libcurl-devel speexdsp-devel soxr-devel   （CI 还没验过）
 
 git clone https://github.com/RevolutionLA/nextless.git
 cd nextless
@@ -81,8 +94,8 @@ ninja -C build
 sudo meson install -C build
 ```
 
-> GCC 15 下严格的 `-Dwerror=true` 可能被某个测试助手的 `-Wunused-result` 绊住：
-> `meson configure build -Dwerror=false` 后重新 ninja 即可。
+> `meson.build` 里默认 `warning_level=3` + `werror=true`，CI 就按这个配置构建，所以任何编译告警
+> 都会让构建失败。本地想临时放宽：`meson configure build -Dwerror=false`。
 
 Arch 用户直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
 
@@ -113,7 +126,7 @@ fcitx5 -r -d
 ### 4. 下载模型（离线后端）
 
 ```bash
-mkdir -p ~/.local/share/nextless
+mkdir -p ~/.local/share/nextless/sherpa-onnx ~/.local/share/nextless/models
 cd /tmp
 
 # sherpa-onnx 运行时：bin/ 和 lib/ 都要拷，二进制用的是 rpath $ORIGIN/../lib
@@ -209,10 +222,13 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ## 开发
 
 ```bash
-meson setup build --buildtype=debug -Dwerror=false
+meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 10 个单测：注册表、配置回落、采集、队列、静音、curl 取消
+meson test -C build            # 11 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落
 ```
+
+跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
+`pulseaudio --start` 加 `pactl load-module module-null-sink` 就够了，CI 就是这么做的。
 
 - `docs/nextless/` —— 设计文档：交互模型、ASR provider 接口、失败场景分析。
 - `docs/fcitx5/` —— fcitx5 插件与配置系统简介。Nextless 在 `PreInputMethod` 阶段挂钩按键事件，
@@ -220,7 +236,8 @@ meson test -C build            # 10 个单测：注册表、配置回落、采�
 - `FINDINGS.md` —— 所有调参数字背后的测量记录（buffer 大小、模型延迟、降噪对比）。保留它是因为
   它解释了默认值为什么是默认值。
 - `tools/` —— 独立小工具：`record_test`、`calibrate_silence`、`tail_loss_test`、
-  `uinput_key`（注入一次合成的“按住某键”，不用手按也能自测 push-to-talk）。
+  `uinput_key`（注入一次合成的“按住某键”，不用手按也能自测 push-to-talk）、
+  `gen_sounds.py`（重新生成随包的提示音）。
 
 诊断日志（每行一个 JSON，不含音频、不含识别文本、不含 key）默认关闭：
 
@@ -247,8 +264,14 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [ ] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
 - [ ] 本地后端的热词 / 自定义词组
 - [ ] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）
-- [ ] `.deb` + CI（build × test 矩阵，让 `-Dwerror` 这类问题在发版前暴露）
+- [ ] `.deb` 打包（以及 AUR 上的 `fcitx5-nextless`）
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
+- [ ] 声音克隆 / 个人纠错学习 —— 还没定，先去看讨论区
+- [x] CI：GCC 下 build × test 矩阵 + `-Dwerror=true`，另加一个开诊断日志的构建
+- [x] 中文文档（就是这一份）
 - [x] 静音是 no-op：不再报 `ASR error: empty result`，FireRed 的 `<sil>` 也不会进文档
 - [x] 提示音已随包附带（`tools/gen_sounds.py` 可重新生成）
 - [x] DeepFilterNet3 作为可选降噪：外部进程有超时上限，失败一律退回 speexdsp
+
+在 [GitHub Issues](https://github.com/RevolutionLA/nextless/issues) 里跟踪的是具体待办，
+上面这一节是方向。
