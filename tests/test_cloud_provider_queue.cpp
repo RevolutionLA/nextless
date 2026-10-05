@@ -21,17 +21,27 @@ bool testProvider(const std::filesystem::path &root, const std::string &name) {
     std::vector<int> order;
     std::vector<std::thread::id> threads;
     std::vector<std::filesystem::path> paths;
+    std::mutex fileMutex;
+    bool filesGone = true;
     Provider provider;
 
     for (int i = 1; i <= 2; ++i) {
         auto path = root / (name + "-" + std::to_string(i) + ".wav");
         std::ofstream(path) << "placeholder";
         paths.push_back(path);
-        provider.setErrorCallback([&, i](const std::string &) {
-            std::lock_guard<std::mutex> lock(mutex);
-            order.push_back(i);
-            threads.push_back(std::this_thread::get_id());
-            ready.notify_one();
+        provider.setErrorCallback([&, i, path](const std::string &) {
+            // Contract: the temp WAV must be deleted BEFORE the callback fires.
+            // Check inside the callback to make this deterministic, not a race.
+            if (std::filesystem::exists(path)) {
+                std::lock_guard<std::mutex> lock(fileMutex);
+                filesGone = false;
+            }
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                order.push_back(i);
+                threads.push_back(std::this_thread::get_id());
+                ready.notify_one();
+            }
         });
         provider.transcribe({}, path.string());
     }
@@ -48,17 +58,9 @@ bool testProvider(const std::filesystem::path &root, const std::string &name) {
         std::cerr << name << " did not use one FIFO worker\n";
         return false;
     }
-    for (const auto &path : paths) {
-        // Contract, not a race: the provider deletes the temp WAV *before* it invokes the
-        // callback, so by the time both callbacks have fired the files must be gone (temp_wav.h).
-        // This assertion is what caught the previous scope-guard ordering, where the deletion
-        // happened on return and lost the race whenever the worker thread was scheduled against
-        // the main thread. Reproduce that shape with: taskset -c 0 ./build/tests/test_cloud_provider_queue
-        // (15/15 failures on the old code, 0/15 after the fix).
-        if (std::filesystem::exists(path)) {
-            std::cerr << name << " left temporary WAV " << path << "\n";
-            return false;
-        }
+    if (!filesGone) {
+        std::cerr << name << " left temporary WAV behind (callback fired before delete)\n";
+        return false;
     }
     return true;
 }
