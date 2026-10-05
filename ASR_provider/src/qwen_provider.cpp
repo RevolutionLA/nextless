@@ -49,17 +49,14 @@ static size_t writeCb(void *ptr, size_t size, size_t nmemb, std::string *out) {
 }
 
 static void loadConfig(std::string &apiKey) {
-    const char *home = getenv("HOME");
-    if (!home) return;
-    std::string path = std::string(home) + "/.config/nextless/qwen.json";
-    std::ifstream f(path);
-    if (!f) {
-        fprintf(stderr, "Nextless Qwen: no config at %s\n", path.c_str());
-        return;
-    }
-    std::string json((std::istreambuf_iterator<char>(f)),
-                      std::istreambuf_iterator<char>());
+    auto json = readConfigFile("qwen.json");
+    if (json.empty()) return;
     apiKey = jsonGetString(json, "api_key");
+}
+
+// 检查 API key 是否为占位符（模板文件中的 sk-YOUR_API_KEY）
+static bool isPlaceholderKey(const std::string &key) {
+    return key == "sk-YOUR_API_KEY" || key.empty();
 }
 
 QwenAsrProvider::QwenAsrProvider() {
@@ -172,6 +169,16 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"reason", "missing_api_key"}
         });
         onE("Qwen: missing api_key in ~/.config/nextless/qwen.json");
+        return;
+    }
+
+    // 占位符检测：模板中的 sk-YOUR_API_KEY 视为未配置，避免发起无意义的云请求
+    if (isPlaceholderKey(apiKey)) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "placeholder_api_key"}
+        });
+        onE("Qwen: template written to ~/.config/nextless/qwen.json — add your real API key");
         return;
     }
 

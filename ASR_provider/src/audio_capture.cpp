@@ -81,13 +81,8 @@ static std::string jsonGetString(const std::string &json, const std::string &key
 }
 
 static void loadAudioConfig(std::string &denoiseMethod) {
-    const char *home = getenv("HOME");
-    if (!home) return;
-    std::string path = std::string(home) + "/.config/nextless/audio.json";
-    std::ifstream f(path);
-    if (!f) return;
-    std::string json((std::istreambuf_iterator<char>(f)),
-                      std::istreambuf_iterator<char>());
+    auto json = readConfigFile("audio.json");
+    if (json.empty()) return;
     auto val = jsonGetString(json, "denoise");
     if (val == "deepfilter") denoiseMethod = "deepfilter";
     else if (val == "speexdsp") denoiseMethod = "speexdsp";

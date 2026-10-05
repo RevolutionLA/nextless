@@ -619,26 +619,20 @@ private:
         audioCapture_ = std::make_unique<nextless::AudioCapture>();
         audioCapture_->setDiagnosticId(recognitionId);
         {
-            // 从 audio.json 读取初始降噪方法，设置到 AudioCapture
-            const char *home = getenv("HOME");
-            if (home) {
-                std::string path = std::string(home) + "/.config/nextless/audio.json";
-                std::ifstream f(path);
-                if (f) {
-                    std::string json((std::istreambuf_iterator<char>(f)),
-                                      std::istreambuf_iterator<char>());
-                    auto pos = json.find("\"denoise\"");
+            // 从 audio.json 读取初始降噪方法（通过 loader，首次运行会从 /etc/nextless 复制）
+            auto json = nextless::readConfigFile("audio.json");
+            if (!json.empty()) {
+                auto pos = json.find("\"denoise\"");
+                if (pos != std::string::npos) {
+                    pos = json.find('"', json.find(':', pos) + 1);
                     if (pos != std::string::npos) {
-                        pos = json.find('"', json.find(':', pos) + 1);
-                        if (pos != std::string::npos) {
-                            pos++;
-                            auto end = json.find('"', pos);
-                            if (end != std::string::npos) {
-                                auto method = json.substr(pos, end - pos);
-                                auto &list = denoiserList();
-                                for (int i = 0; i < (int)list.size(); i++) {
-                                    if (list[i] == method) { denoiserIndex_ = i; break; }
-                                }
+                        pos++;
+                        auto end = json.find('"', pos);
+                        if (end != std::string::npos) {
+                            auto method = json.substr(pos, end - pos);
+                            auto &list = denoiserList();
+                            for (int i = 0; i < (int)list.size(); i++) {
+                                if (list[i] == method) { denoiserIndex_ = i; break; }
                             }
                         }
                     }
