@@ -33,6 +33,13 @@ After copying, edit the files under `~/.config/nextless/`. Do not put real keys 
 | `nextless.json.example` | `~/.config/nextless/nextless.json` | Activation delay, notifications, CapsLock debounce |
 | `advanced.json.example` | `~/.config/nextless/advanced.json` | Optional model paths, timeouts, thread counts, and audio tuning |
 
+Notes on `advanced.json`:
+
+- Omitting `num_threads` follows the CPU (capped at 12) — do not ship the old hardcoded `30`.
+- Omitting `model_dir` / `bin_path` uses the built-in locations under `~/.local/share/nextless/`
+  that the README download steps create; the example keeps those same values so a copied file
+  never silently points somewhere else.
+
 ## Update Rule
 
 When adding a new runtime config key, update the relevant `.json.example`, this README, and the user-facing configuration section in `README.md`. When adding a whole new config file, also add it to the `install_data(... rename: [...])` list in `meson.build`, or it will never be installed.
