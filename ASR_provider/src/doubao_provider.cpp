@@ -107,18 +107,15 @@ static std::string getHeader(const std::string &headers, const std::string &name
 }
 
 static void loadConfig(std::string &apiKey, std::string &resourceId) {
-    const char *home = getenv("HOME");
-    if (!home) return;
-    std::string path = std::string(home) + "/.config/nextless/doubao.json";
-    std::ifstream f(path);
-    if (!f) {
-        fprintf(stderr, "Nextless Doubao: no config at %s\n", path.c_str());
-        return;
-    }
-    std::string json((std::istreambuf_iterator<char>(f)),
-                      std::istreambuf_iterator<char>());
+    auto json = readConfigFile("doubao.json");
+    if (json.empty()) return;
     apiKey = jsonGetString(json, "api_key");
     resourceId = jsonGetString(json, "resource_id");
+}
+
+// 检查 API key 是否为占位符（模板文件中的 YOUR_API_KEY）
+static bool isPlaceholderKey(const std::string &key) {
+    return key == "YOUR_API_KEY" || key.empty();
 }
 
 DoubaoAsrProvider::DoubaoAsrProvider() {
@@ -240,6 +237,16 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             {"reason", "missing_credentials"}
         });
         onE("Doubao: missing api_key or resource_id in ~/.config/nextless/doubao.json");
+        return;
+    }
+
+    // 占位符检测：模板中的 YOUR_API_KEY 视为未配置，避免发起无意义的云请求
+    if (isPlaceholderKey(apiKey)) {
+        diagnosticLog().event("provider", "request_error", {
+            {"provider", "doubao"}, {"recognition_id", std::to_string(diagnosticId)},
+            {"reason", "placeholder_api_key"}
+        });
+        onE("Doubao: template written to ~/.config/nextless/doubao.json — add your real API key");
         return;
     }
 

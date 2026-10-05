@@ -18,6 +18,8 @@
 #include <filesystem>
 #include <ebur128.h>
 #include <cstdlib>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -81,17 +83,57 @@ static std::string jsonGetString(const std::string &json, const std::string &key
 }
 
 static void loadAudioConfig(std::string &denoiseMethod) {
-    const char *home = getenv("HOME");
-    if (!home) return;
-    std::string path = std::string(home) + "/.config/nextless/audio.json";
-    std::ifstream f(path);
-    if (!f) return;
-    std::string json((std::istreambuf_iterator<char>(f)),
-                      std::istreambuf_iterator<char>());
+    auto json = readConfigFile("audio.json");
+    if (json.empty()) return;
     auto val = jsonGetString(json, "denoise");
     if (val == "deepfilter") denoiseMethod = "deepfilter";
     else if (val == "speexdsp") denoiseMethod = "speexdsp";
     else if (val == "true") denoiseMethod = "speexdsp";
+}
+
+// 获取安全的 capture 目录：$XDG_RUNTIME_DIR/nextless/（模式 0700）
+static std::string secureCaptureDir() {
+    const char *xdg = getenv("XDG_RUNTIME_DIR");
+    if (!xdg || !*xdg) xdg = "/tmp"; // fallback
+
+    std::string dir = std::string(xdg) + "/nextless";
+    struct stat st;
+    if (stat(dir.c_str(), &st) != 0) {
+        // 目录不存在，创建它
+        if (mkdir(dir.c_str(), 0700) != 0) {
+            fprintf(stderr, "Nextless Capture: cannot create %s: %s\n",
+                    dir.c_str(), strerror(errno));
+            return "";
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        // 存在但不是目录（可能是 symlink attack）
+        fprintf(stderr, "Nextless Capture: %s exists but is not a directory\n", dir.c_str());
+        return "";
+    } else {
+        // 目录已存在，确保权限是 0700
+        chmod(dir.c_str(), 0700);
+    }
+    return dir;
+}
+
+// 启动时清理孤儿文件（来自之前崩溃的会话）
+static void sweepOrphanedWavs(const std::string &dir) {
+    if (dir.empty()) return;
+
+    try {
+        for (const auto &entry : std::filesystem::directory_iterator(dir)) {
+            auto filename = entry.path().filename().string();
+            // 匹配 nextless_cap_<pid>_<n>.wav 模式
+            if (filename.find("nextless_cap_") == 0 &&
+                filename.size() > 13 &&
+                filename.substr(filename.size() - 4) == ".wav") {
+                std::filesystem::remove(entry.path());
+                fprintf(stderr, "Nextless Capture: swept orphaned WAV %s\n", filename.c_str());
+            }
+        }
+    } catch (const std::exception &e) {
+        fprintf(stderr, "Nextless Capture: failed to sweep orphans: %s\n", e.what());
+    }
 }
 
 AudioCapture::AudioCapture() {
@@ -101,6 +143,16 @@ AudioCapture::AudioCapture() {
     diagnosticLog().event("audio", "capture_created", {
         {"denoiser", denoiseMethod_.empty() ? "none" : denoiseMethod_}
     });
+
+    // 启动时清理孤儿 WAV 文件（来自之前崩溃的会话）
+    static bool sweepDone = false;
+    if (!sweepDone) {
+        auto dir = secureCaptureDir();
+        if (!dir.empty()) {
+            sweepOrphanedWavs(dir);
+            sweepDone = true;
+        }
+    }
 
     static bool configLoaded = false;
     if (!configLoaded) {
@@ -151,7 +203,14 @@ void AudioCapture::start() {
     stopRequested_ = false;
     finished_ = false;
     captureId_ = nextCaptureId.fetch_add(1);
-    wavPath_ = "/tmp/nextless_cap_" + std::to_string(getpid()) + "_" +
+
+    // 使用安全目录：$XDG_RUNTIME_DIR/nextless/（模式 0700）
+    auto dir = secureCaptureDir();
+    if (dir.empty()) {
+        fprintf(stderr, "Nextless Capture: cannot determine safe capture directory\n");
+        return;
+    }
+    wavPath_ = dir + "/nextless_cap_" + std::to_string(getpid()) + "_" +
                std::to_string(captureId_) + ".wav";
     diagnosticLog().event("audio", "capture_start", {
         {"recognition_id", std::to_string(diagnosticId_)},
@@ -603,9 +662,11 @@ bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
                       + std::to_string(dfSeq++) + "_XXXXXX.wav";
     std::vector<char> name(tpl.begin(), tpl.end());
     name.push_back('\0');
-    const int tmpFd = mkstemps(name.data(), 4);
-    if (tmpFd < 0) return giveUp("cannot create a temp wav");
-    close(tmpFd);
+    // 使用 mkstemp 生成唯一文件名但不创建文件（writeWav 会用 O_EXCL 创建）
+    int dummyFd = mkstemps(name.data(), 4);
+    if (dummyFd < 0) return giveUp("cannot generate a unique temp filename");
+    close(dummyFd);
+    unlink(name.data()); // 删除 mkstemps 创建的文件，让 writeWav 重新创建
     const std::string tmp48k(name.data());
     struct Cleanup {
         const std::string &path;
@@ -843,9 +904,19 @@ void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::stri
                             uint32_t sampleRate) {
     auto t0 = std::chrono::steady_clock::now();
 
-    FILE *f = fopen(path.c_str(), "wb");
+    // 使用 open(O_CREAT|O_EXCL|O_NOFOLLOW) 防止 symlink following，模式 0600
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        fprintf(stderr, "Nextless Capture: cannot create WAV at %s: %s\n",
+                path.c_str(), strerror(errno));
+        return;
+    }
+    FILE *f = fdopen(fd, "wb");
     if (!f) {
-        fprintf(stderr, "Nextless Capture: cannot write WAV to %s\n", path.c_str());
+        close(fd);
+        unlink(path.c_str()); // 清理失败的文件
+        fprintf(stderr, "Nextless Capture: cannot fdopen WAV at %s: %s\n",
+                path.c_str(), strerror(errno));
         return;
     }
 
