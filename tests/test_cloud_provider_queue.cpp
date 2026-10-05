@@ -84,14 +84,14 @@ bool testQueuedCleanup(const std::filesystem::path &root,
 int main() {
     namespace fs = std::filesystem;
     const char *tmp = std::getenv("MESON_TEST_TMPDIR");
-    fs::path root = (tmp && *tmp) ? tmp : "/tmp/vinput-cloud-provider-queue";
-    fs::create_directories(root / ".config/vinput");
+    fs::path root = (tmp && *tmp) ? tmp : "/tmp/nextless-cloud-provider-queue";
+    fs::create_directories(root / ".config/nextless");
     setenv("HOME", root.c_str(), 1);
 
-    return testProvider<vinput::DoubaoAsrProvider>(root, "doubao") &&
-                   testProvider<vinput::QwenAsrProvider>(root, "qwen") &&
-                   testQueuedCleanup<vinput::DoubaoAsrProvider>(root, "doubao") &&
-                   testQueuedCleanup<vinput::QwenAsrProvider>(root, "qwen")
+    return testProvider<nextless::DoubaoAsrProvider>(root, "doubao") &&
+                   testProvider<nextless::QwenAsrProvider>(root, "qwen") &&
+                   testQueuedCleanup<nextless::DoubaoAsrProvider>(root, "doubao") &&
+                   testQueuedCleanup<nextless::QwenAsrProvider>(root, "qwen")
                ? 0
                : 1;
 }

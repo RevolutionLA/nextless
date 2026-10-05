@@ -1,31 +1,32 @@
-# Maintainer: xander-lin
+# Maintainer: RevolutionLA <https://github.com/RevolutionLA>
 
-pkgname=fcitx5-vinput-git
-_pkgname=fcitx5-vinput
-pkgver=0.1.0.r129.b50563a
+pkgname=fcitx5-nextless-git
+_pkgname=fcitx5-nextless
+pkgver=0.2.0.r0.0000000
 pkgrel=1
-pkgdesc="Voice input addon for fcitx5: push-to-talk ASR via CapsLock"
-arch=('x86_64')
-url="https://github.com/xander-lin/vinput"
+pkgdesc="Push-to-talk voice input addon for fcitx5 with a configurable hotkey (offline-first, Linux Typeless)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/RevolutionLA/nextless"
 license=('MIT')
 depends=('fcitx5' 'libebur128' 'libpulse' 'curl' 'speexdsp' 'libsoxr')
 makedepends=('git' 'meson' 'ninja')
+optdepends=('sherpa-onnx: local offline ASR backends (zipformer / fire-red)')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 install=PKGBUILD.install
-source=("$_pkgname::git+https://gitee.com/xander-lin/vinput.git")
+source=("$_pkgname::git+https://github.com/RevolutionLA/nextless.git")
 sha256sums=('SKIP')
 backup=(
-    'etc/vinput/advanced.json'
-    'etc/vinput/audio.json'
-    'etc/vinput/doubao.json'
-    'etc/vinput/qwen.json'
-    'etc/vinput/vinput.json'
+    'etc/nextless/advanced.json'
+    'etc/nextless/audio.json'
+    'etc/nextless/doubao.json'
+    'etc/nextless/qwen.json'
+    'etc/nextless/nextless.json'
 )
 
 pkgver() {
     cd "$_pkgname"
-    printf "0.1.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.2.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
@@ -42,7 +43,7 @@ package() {
     for f in config/*.json.example; do
         name=${f##*/}
         name=${name%.example}
-        install -Dm644 "$f" "$pkgdir/etc/vinput/$name"
+        install -Dm644 "$f" "$pkgdir/etc/nextless/$name"
         install -Dm644 "$f" "$pkgdir/usr/share/doc/$_pkgname/$f"
     done
 }

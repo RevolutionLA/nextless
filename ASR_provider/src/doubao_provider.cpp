@@ -1,5 +1,5 @@
 #include "doubao_provider.h"
-#include "vinput_config.h"
+#include "nextless_config.h"
 #include "diagnostic_log.h"
 
 #include <curl/curl.h>
@@ -14,7 +14,7 @@
 #include <fstream>
 #include <memory>
 
-namespace vinput {
+namespace nextless {
 
 static bool waitCancelable(const std::shared_ptr<std::atomic_bool> &cancel,
                            int milliseconds) {
@@ -108,10 +108,10 @@ static std::string getHeader(const std::string &headers, const std::string &name
 static void loadConfig(std::string &apiKey, std::string &resourceId) {
     const char *home = getenv("HOME");
     if (!home) return;
-    std::string path = std::string(home) + "/.config/vinput/doubao.json";
+    std::string path = std::string(home) + "/.config/nextless/doubao.json";
     std::ifstream f(path);
     if (!f) {
-        fprintf(stderr, "Vinput Doubao: no config at %s\n", path.c_str());
+        fprintf(stderr, "Nextless Doubao: no config at %s\n", path.c_str());
         return;
     }
     std::string json((std::istreambuf_iterator<char>(f)),
@@ -212,7 +212,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                                           AsrResultCallback onR,
                                           AsrErrorCallback onE,
                                           uint64_t diagnosticId) {
-    fprintf(stderr, "Vinput Doubao: recorded %zu samples to %s\n",
+    fprintf(stderr, "Nextless Doubao: recorded %zu samples to %s\n",
             samples.size(), wavPath.c_str());
     diagnosticLog().event("provider", "request_started", {
         {"provider", "doubao"}, {"recognition_id", std::to_string(diagnosticId)},
@@ -226,7 +226,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "doubao"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "missing_credentials"}
         });
-        if (onE) onE("Doubao: missing api_key or resource_id in ~/.config/vinput/doubao.json");
+        if (onE) onE("Doubao: missing api_key or resource_id in ~/.config/nextless/doubao.json");
         return;
     }
 
@@ -309,7 +309,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
             curl_slist_free_all(headers);
 
-            fprintf(stderr, "Vinput Doubao: submit HTTP %ld\n", httpCode);
+            fprintf(stderr, "Nextless Doubao: submit HTTP %ld\n", httpCode);
             if (res != CURLE_OK) {
                 if (cancel->load()) {
                     diagnosticLog().event("provider", "request_cancelled", {
@@ -319,7 +319,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                     });
                     return;
                 }
-                fprintf(stderr, "Vinput Doubao: submit failed, curl=%d (%s), response_bytes=%zu\n",
+                fprintf(stderr, "Nextless Doubao: submit failed, curl=%d (%s), response_bytes=%zu\n",
                         (int)res, curl_easy_strerror(res), respBody.size());
                 evictCurlHandle();
                 diagnosticLog().event("provider", "request_error", {
@@ -347,7 +347,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
 
             std::string statusCode = getHeader(respHdr, "x-api-status-code");
             if (!statusCode.empty() && statusCode != "20000000") {
-                fprintf(stderr, "Vinput Doubao: submit rejected status=%s\n", statusCode.c_str());
+                fprintf(stderr, "Nextless Doubao: submit rejected status=%s\n", statusCode.c_str());
                 if (onE) onE("Doubao: submit rejected (" + statusCode + ")");
                 return;
             }
@@ -429,7 +429,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                 consecutiveNetworkErrors++;
                 evictCurlHandle();
                 fprintf(stderr,
-                        "Vinput Doubao: query #%d HTTP %ld curl=%d (%s), retry %d/3\n",
+                        "Nextless Doubao: query #%d HTTP %ld curl=%d (%s), retry %d/3\n",
                         pollCount, httpCode, (int)res, curl_easy_strerror(res),
                         consecutiveNetworkErrors);
                 if (consecutiveNetworkErrors >= 3) {
@@ -470,7 +470,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             if (statusCode == "20000000") {
                 auto tResult = std::chrono::steady_clock::now();
                 std::string text = jsonGetString(respBody, "text");
-                fprintf(stderr, "Vinput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d text_len=%zu\n",
+                fprintf(stderr, "Nextless Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d text_len=%zu\n",
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tSubmit - tEncode).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tSubmit).count(),
@@ -492,7 +492,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             }
             if (statusCode == "20000003") {
                 auto tResult = std::chrono::steady_clock::now();
-                fprintf(stderr, "Vinput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d (silence)\n",
+                fprintf(stderr, "Nextless Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d (silence)\n",
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tSubmit - tEncode).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tSubmit).count(),
@@ -511,15 +511,15 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                     {"recognition_id", std::to_string(diagnosticId)},
                     {"reason", "recognition_status"}
                 });
-                fprintf(stderr, "Vinput Doubao: query status=%s response_bytes=%zu\n",
+                fprintf(stderr, "Nextless Doubao: query status=%s response_bytes=%zu\n",
                         statusCode.c_str(), respBody.size());
                 if (onE) onE("Doubao: recognition failed (" + statusCode + ")");
                 return;
             }
-            fprintf(stderr, "Vinput Doubao: query #%d processing...\n", pollCount);
+            fprintf(stderr, "Nextless Doubao: query #%d processing...\n", pollCount);
         }
 
-        fprintf(stderr, "Vinput Doubao: query timeout\n");
+        fprintf(stderr, "Nextless Doubao: query timeout\n");
         diagnosticLog().event("provider", "request_timeout", {
             {"provider", "doubao"},
             {"recognition_id", std::to_string(diagnosticId)}
@@ -542,4 +542,4 @@ static bool _doubaoReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace nextless

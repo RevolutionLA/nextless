@@ -70,7 +70,7 @@
 
 ### 配置
 
-文件: `~/.config/vinput/qwen.json`
+文件: `~/.config/nextless/qwen.json`
 
 ```json
 {"api_key": "sk-xxx"}

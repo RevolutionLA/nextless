@@ -7,8 +7,8 @@
 int main() {
     using Clock = std::chrono::steady_clock;
 
-    vinput::AudioCapture capture;
-    vinput::AudioCapture secondCapture;
+    nextless::AudioCapture capture;
+    nextless::AudioCapture secondCapture;
     capture.start();
     secondCapture.start();
     if (capture.wavPath() == secondCapture.wavPath()) {

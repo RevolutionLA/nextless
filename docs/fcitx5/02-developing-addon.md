@@ -89,9 +89,9 @@ fcitx5 -rd
 #include <fcitx/addonmanager.h>
 #include <fcitx/instance.h>
 
-class VinputAddon : public fcitx::AddonInstance {
+class NextlessAddon : public fcitx::AddonInstance {
 public:
-    VinputAddon(fcitx::Instance *instance)
+    NextlessAddon(fcitx::Instance *instance)
         : instance_(instance) {
         // 注册事件监听
         eventHandler_ = instance_->watchEvent(
@@ -127,14 +127,14 @@ private:
     fcitx::Key triggerKey_;
 };
 
-class VinputFactory : public fcitx::AddonFactory {
+class NextlessFactory : public fcitx::AddonFactory {
     fcitx::AddonInstance *create(fcitx::AddonManager *manager) override {
         FCITX_UNUSED(manager);
-        return new VinputAddon(manager->instance());
+        return new NextlessAddon(manager->instance());
     }
 };
 
-FCITX_ADDON_FACTORY(VinputFactory);
+FCITX_ADDON_FACTORY(NextlessFactory);
 ```
 
 ## 向 InputContext 提交文本

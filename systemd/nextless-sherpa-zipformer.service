@@ -1,0 +1,24 @@
+[Unit]
+Description=Nextless Sherpa-ONNX WebSocket Server (Zipformer)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/nextless/sherpa-onnx/bin/sherpa-onnx-offline-websocket-server \
+  --port=18000 \
+  --encoder=%h/.local/share/nextless/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/encoder-epoch-99-avg-1.onnx \
+  --decoder=%h/.local/share/nextless/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/decoder-epoch-99-avg-1.onnx \
+  --joiner=%h/.local/share/nextless/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/joiner-epoch-99-avg-1.onnx \
+  --tokens=%h/.local/share/nextless/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/tokens.txt \
+  --model-type=transducer \
+  --provider=cpu \
+  --num-threads=12 \
+  --num-work-threads=5 \
+  --max-batch-size=1 \
+  --log-file=%h/.local/share/nextless/logs/zipformer-server.log
+Restart=on-failure
+RestartSec=5
+Slice=user-expensive.slice
+
+[Install]
+WantedBy=default.target

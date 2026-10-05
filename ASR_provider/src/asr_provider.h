@@ -8,7 +8,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace vinput {
+namespace nextless {
 
 using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
 using AsrErrorCallback = std::function<void(const std::string &error)>;
@@ -74,4 +74,4 @@ private:
     std::vector<std::unique_ptr<IAsrProviderFactory>> factories_;
 };
 
-} // namespace vinput
+} // namespace nextless

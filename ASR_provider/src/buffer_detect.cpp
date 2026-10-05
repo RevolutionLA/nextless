@@ -17,7 +17,7 @@
 
 using Clock = std::chrono::steady_clock;
 
-namespace vinput {
+namespace nextless {
 
 struct BufferCacheEntry {
     std::string sourceId;
@@ -25,12 +25,12 @@ struct BufferCacheEntry {
 };
 
 static std::string configPath() {
-    const char *overridePath = getenv("VINPUT_PA_BUFFER_CONFIG");
+    const char *overridePath = getenv("NEXTLESS_PA_BUFFER_CONFIG");
     if (overridePath && *overridePath) return overridePath;
 
     const char *home = getenv("HOME");
     if (!home) home = "/tmp";
-    std::string dir = std::string(home) + "/.config/vinput";
+    std::string dir = std::string(home) + "/.config/nextless";
     mkdir(dir.c_str(), 0755);
     return dir + "/pa_buffer.json";
 }
@@ -104,7 +104,7 @@ static std::vector<BufferCacheEntry> parseDeviceEntries(const std::string &conte
 }
 
 static std::string defaultSourceId() {
-    const char *overrideId = getenv("VINPUT_PA_SOURCE_ID");
+    const char *overrideId = getenv("NEXTLESS_PA_SOURCE_ID");
     if (overrideId && *overrideId) return overrideId;
 
     FILE *pipe = popen("pactl get-default-source 2>/dev/null", "r");
@@ -149,7 +149,7 @@ static void saveToConfig(size_t bytes, const std::string &sourceId) {
 
     std::ofstream f(configPath());
     if (!f.is_open()) {
-        fprintf(stderr, "Vinput: failed to write %s\n", configPath().c_str());
+        fprintf(stderr, "Nextless: failed to write %s\n", configPath().c_str());
         return;
     }
     f << "{\n"
@@ -162,12 +162,12 @@ static void saveToConfig(size_t bytes, const std::string &sourceId) {
     f << "  }\n"
       << "}\n";
     f.close();
-    fprintf(stderr, "Vinput: saved buffer=%zu for source=%s to %s\n",
+    fprintf(stderr, "Nextless: saved buffer=%zu for source=%s to %s\n",
             bytes, sourceId.c_str(), configPath().c_str());
 }
 
 size_t detectHardwareBurstBytes() {
-    fprintf(stderr, "Vinput: detecting hardware buffer period...\n");
+    fprintf(stderr, "Nextless: detecting hardware buffer period...\n");
 
     pa_sample_spec ss;
     ss.format = PA_SAMPLE_S16LE;
@@ -175,10 +175,10 @@ size_t detectHardwareBurstBytes() {
     ss.channels = 1;
 
     int error = 0;
-    auto *pa = pa_simple_new(nullptr, "vinput-detect", PA_STREAM_RECORD,
+    auto *pa = pa_simple_new(nullptr, "nextless-detect", PA_STREAM_RECORD,
                              nullptr, "voice", &ss, nullptr, nullptr, &error);
     if (!pa) {
-        fprintf(stderr, "Vinput: PA detection error: %s, using default 16384\n", pa_strerror(error));
+        fprintf(stderr, "Nextless: PA detection error: %s, using default 16384\n", pa_strerror(error));
         return 16384;
     }
 
@@ -188,13 +188,13 @@ size_t detectHardwareBurstBytes() {
     std::vector<double> readMs;
 
     auto tEnd = Clock::now() + std::chrono::seconds(6);
-    fprintf(stderr, "Vinput: recording 6s for detection...\n");
+    fprintf(stderr, "Nextless: recording 6s for detection...\n");
 
     while (Clock::now() < tEnd) {
         int err = 0;
         auto t0 = Clock::now();
         if (pa_simple_read(pa, buf, kDetectBufSize, &err) < 0) {
-            fprintf(stderr, "Vinput: detection read error: %s\n", pa_strerror(err));
+            fprintf(stderr, "Nextless: detection read error: %s\n", pa_strerror(err));
             break;
         }
         auto t1 = Clock::now();
@@ -205,7 +205,7 @@ size_t detectHardwareBurstBytes() {
     pa_simple_free(pa);
 
     if (readMs.size() < 3) {
-        fprintf(stderr, "Vinput: too few reads (%zu), using default 16384\n", readMs.size());
+        fprintf(stderr, "Nextless: too few reads (%zu), using default 16384\n", readMs.size());
         return 16384;
     }
 
@@ -229,14 +229,14 @@ size_t detectHardwareBurstBytes() {
     bool hasBurst = (maxGap > 50.0) && (slowVal > fastVal * 3.0);
 
     if (!hasBurst) {
-        fprintf(stderr, "Vinput: continuous streaming (max_gap=%.0fms min=%.0f max=%.0f) → default 16384\n",
+        fprintf(stderr, "Nextless: continuous streaming (max_gap=%.0fms min=%.0f max=%.0f) → default 16384\n",
                 maxGap, sorted.front(), sorted.back());
         return 16384;
     }
 
     double thresholdMs = fastVal + maxGap * 0.3;
     double fastBound = thresholdMs * 0.3;
-    fprintf(stderr, "Vinput: burst pattern: fast=%.0fms slow=%.0fms gap=%.0fms threshold=%.0fms\n",
+    fprintf(stderr, "Nextless: burst pattern: fast=%.0fms slow=%.0fms gap=%.0fms threshold=%.0fms\n",
             fastVal, slowVal, maxGap, thresholdMs);
 
     // 分类: >threshold = slow (fill 期), <fastBound = fast (burst 期)
@@ -267,14 +267,14 @@ size_t detectHardwareBurstBytes() {
     }
 
     if (burstSizes.empty()) {
-        fprintf(stderr, "Vinput: no burst pattern, using default 16384\n");
+        fprintf(stderr, "Nextless: no burst pattern, using default 16384\n");
         return 16384;
     }
 
     // 取第一个完整 burst（通常最早记录的 cycle 最准，后续可能受干扰）
     // 但考虑到时序抖动，取最大 burst 做保守估计
     size_t maxBurst = 0;
-    fprintf(stderr, "Vinput: detected bursts: ");
+    fprintf(stderr, "Nextless: detected bursts: ");
     for (size_t i = 0; i < burstSizes.size(); i++) {
         fprintf(stderr, "%zu%s", burstSizes[i], i + 1 < burstSizes.size() ? ", " : "");
         if (burstSizes[i] > maxBurst) maxBurst = burstSizes[i];
@@ -286,7 +286,7 @@ size_t detectHardwareBurstBytes() {
     if (result < 4096) result = 4096;
     if (result > 1048576) result = 1048576;
 
-    fprintf(stderr, "Vinput: buffer set to %zu bytes (%.1f s @16kHz)\n",
+    fprintf(stderr, "Nextless: buffer set to %zu bytes (%.1f s @16kHz)\n",
             result, result / 32000.0);
     return result;
 }
@@ -297,7 +297,7 @@ size_t loadOrDetectBufferBytes(std::function<void(const std::string &)> onStatus
     size_t cached = loadFromConfig(sourceId, &usedLegacy);
     if (cached > 0) {
         if (usedLegacy) saveToConfig(cached, sourceId);
-        fprintf(stderr, "Vinput: using cached buffer=%zu bytes (%.1f s) for source=%s\n",
+        fprintf(stderr, "Nextless: using cached buffer=%zu bytes (%.1f s) for source=%s\n",
                 cached, cached / 32000.0, sourceId.c_str());
         return cached;
     }
@@ -309,4 +309,4 @@ size_t loadOrDetectBufferBytes(std::function<void(const std::string &)> onStatus
     return detected;
 }
 
-} // namespace vinput
+} // namespace nextless

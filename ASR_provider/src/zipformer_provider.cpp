@@ -1,5 +1,5 @@
 #include "zipformer_provider.h"
-#include "vinput_config.h"
+#include "nextless_config.h"
 #include "diagnostic_log.h"
 
 #include <unistd.h>
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace vinput {
+namespace nextless {
 
 static std::string expandPath(const std::string &p) {
     if (!p.empty() && p[0] == '~') {
@@ -27,7 +27,7 @@ static std::string expandPath(const std::string &p) {
 }
 
 ZipformerAsrProvider::ZipformerAsrProvider()
-    : modelDir_("~/.local/share/vinput/models/zipformer-zh-en") {
+    : modelDir_("~/.local/share/nextless/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20") {
     auto adv = advancedSection("zipformer");
     if (!adv.empty()) {
         auto d = jsonStr(adv, "model_dir");
@@ -192,7 +192,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         close(pipefd[0]);
 
         if (!reaped) {
-            fprintf(stderr, "Vinput Zipformer: waitpid failed\n");
+            fprintf(stderr, "Nextless Zipformer: waitpid failed\n");
             unlink(wav.c_str());
             if (onE) onE("Zipformer: recognition failed");
             return;
@@ -200,7 +200,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         auto tRecv = std::chrono::steady_clock::now();
 
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            fprintf(stderr, "Vinput Zipformer: child exit=%d\n",
+            fprintf(stderr, "Nextless Zipformer: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
             unlink(wav.c_str());
             if (onE) onE("Zipformer: recognition failed");
@@ -217,7 +217,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         }
 
         auto tParse = std::chrono::steady_clock::now();
-        fprintf(stderr, "Vinput Zipformer [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
+        fprintf(stderr, "Nextless Zipformer [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecv - t0).count(),
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
@@ -254,4 +254,4 @@ static bool _zipReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace nextless

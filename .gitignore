@@ -9,3 +9,8 @@ config/*.json
 log.txt
 out/
 .cortexkit/
+
+# IDE
+.idea/
+.cortexkit/
+.vscode/

@@ -8,11 +8,11 @@
 #include <utility>
 #include <vector>
 
-#ifndef VINPUT_DIAGNOSTICS_ENABLED
-#define VINPUT_DIAGNOSTICS_ENABLED 0
+#ifndef NEXTLESS_DIAGNOSTICS_ENABLED
+#define NEXTLESS_DIAGNOSTICS_ENABLED 0
 #endif
 
-namespace vinput {
+namespace nextless {
 
 using DiagnosticFields = std::vector<std::pair<std::string, std::string>>;
 
@@ -68,4 +68,4 @@ std::string hashDiagnosticValue(std::string_view value);
 std::unique_ptr<IDiagnosticLog> makeDiagnosticLog();
 IDiagnosticLog &diagnosticLog();
 
-} // namespace vinput
+} // namespace nextless

@@ -1,0 +1,229 @@
+# Nextless（中文）
+
+**fcitx5 的按住说话语音输入 —— 按住一个键、说话、松手，文字直接落在光标处。**
+
+Nextless 是 Linux 桌面版的 Typeless 式听写工具（Wayland 与 X11 都可用），以 fcitx5 原生插件的
+形式实现。它 fork 自 [xander-lin/vinput](https://github.com/xander-lin/vinput)，改造的核心只有一件事：
+**触发键由你自己定**——包括右 Ctrl 这类纯修饰键——并且不改变键盘的任何其它行为。
+
+English README: [README.md](README.md)
+
+```
+   按住右 Ctrl         说话          松手
+  ─────────────────────────────────────────▶  文字出现在光标处
+```
+
+## 为什么要做这个
+
+Linux 上的语音转文字工具不少，但**不打断你工作的听写**很少：
+
+| | Typeless / Wispr Flow | [openless](https://github.com/Open-Less/openless) | Electron 听写应用 | **Nextless** |
+|---|---|---|---|---|
+| 平台 | macOS / Windows | macOS / Windows | 跨平台 | **Linux（Wayland + X11）** |
+| 触发键 | 可配置 | 可配置 | 全局快捷键，分不出左右 Ctrl | **任意键，含右 Ctrl / Alt / Super** |
+| 任意应用可用 | 是 | 是 | 靠模拟打字 | **是——它本身就是输入法** |
+| 离线识别 | 否 | 否 | 部分 | **是（sherpa-onnx）** |
+| 常驻后台进程 | 是 | 是 | 是 | **否** |
+| 响度归一 + 降噪 + VAD | 是 | 看实现 | 看实现 | **是** |
+
+因为 Nextless 是 fcitx5 模块，文字通过浏览器、编辑器、终端本来就在用的输入法路径上屏：
+不需要无障碍权限，不需要 `xdotool`，不走剪贴板，也不会抢焦点。
+
+## 特性
+
+- **触发键可配。** `fcitx5 配置工具 → 插件 → Nextless → Push-to-talk key`，或直接改
+  `~/.config/fcitx5/conf/nextless.conf`。支持纯修饰键（左右 Ctrl / Alt / Shift / Super）和组合键。
+  短按不触发，这个键照常打字；长按 300 ms（可调）开始录音。
+- **仍然支持 CapsLock，但不再乱改大写状态。** 选 CapsLock 时，Nextless 通过 `/dev/uinput`
+  把它补回去，锁定状态不会翻转；选其它键时**根本不创建**虚拟键盘。
+- **五种识别后端，一个手势热切换。** 两个完全离线（Zipformer 中英混说、FireRed ASR2 int8，走
+  [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)），两个云端（豆包流式 2.0、Qwen3-ASR），
+  一个 mock 用于自测。`Shift+触发键` 后按 ←/→ 换后端，↑/↓ 换降噪。
+- **完整的音频链路**，不是把麦克风原始数据直接丢给模型：PulseAudio 采集 → EBU R128 响度归一
+  （−16 LUFS）→ speexdsp 或 DeepFilterNet 降噪 → VAD 静音裁剪，并保留一小段尾音，最后一个字不会被切掉。
+- **顺序可靠。** 上一句还在识别时就能开始下一句。每次结果绑定“开始录音那一刻”的窗口与输入上下文，
+  并按录音顺序上屏（最多 3 个在途）。
+- **报错不进正文。** 网络、服务、超时、麦克风、没说话，都只显示在光标旁的输入法状态面板里。
+
+## 已知限制（装之前先看）
+
+- **本地模型不出标点。** Zipformer 和 FireRed 只给裸文本。要标点暂时只能用豆包后端，
+  或者等 [Roadmap](#后续计划) 里的 ct-transformer 方案。
+- **中英混说**在 Zipformer bilingual 上能用，方言和专有名词偏弱；FireRed 明显更准但更慢。
+- **模型不随仓库分发**，需要自己下载（约 360 MB 或 1.2 GB，见下）。
+- **还没有 `.deb`**，`fcitx5-nextless-git` 也还没进 AUR —— `PKGBUILD` 已提供，打包进度见
+  [Roadmap](#后续计划)。
+
+## 环境要求
+
+- Linux，fcitx5 **≥ 5.1**，PulseAudio（PipeWire 的 Pulse 兼容层即可，已在 PipeWire 1.x 实测）
+- 任意桌面：GNOME / KDE / Hyprland，Wayland 或 X11；一个能用的麦克风输入设备
+- 默认模型覆盖中文、英文与中英混说
+
+## 安装
+
+### 1. 构建
+
+```bash
+# Debian / Ubuntu（包名已在 Ubuntu 26.04 验证）
+sudo apt install -y g++ meson ninja-build git \
+  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+
+git clone https://github.com/RevolutionLA/nextless.git
+cd nextless
+meson setup build --prefix=/usr --buildtype=release
+ninja -C build
+sudo meson install -C build
+```
+
+> GCC 15 下严格的 `-Dwerror=true` 可能被某个测试助手的 `-Wunused-result` 绊住：
+> `meson configure build -Dwerror=false` 后重新 ninja 即可。
+
+Arch 用户直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
+
+### 2. 加载插件
+
+清单装在 `/usr/share/fcitx5/addon/nextless.conf`，`OnDemand=False`，所以重启 fcitx5 就够了。
+它是 module 不是 ime，**不用**加进输入法列表。
+
+```bash
+fcitx5 -r -d
+```
+
+### 3. 选你的触发键
+
+`fcitx5 配置工具 → 插件 → Nextless → Push-to-talk key`，或者：
+
+```bash
+mkdir -p ~/.config/fcitx5/conf
+cat > ~/.config/fcitx5/conf/nextless.conf <<'EOF'
+[Hotkey]
+0=Control_R
+
+DefaultProvider=zipformer
+EOF
+fcitx5 -r -d
+```
+
+### 4. 下载模型（离线后端）
+
+```bash
+mkdir -p ~/.local/share/nextless
+cd /tmp
+
+# sherpa-onnx 运行时：bin/ 和 lib/ 都要拷，二进制用的是 rpath $ORIGIN/../lib
+V=1.13.8
+curl -LO "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${V}/sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
+tar xf "sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
+cp -r "sherpa-onnx-v${V}-linux-x64-shared/"{bin,lib} ~/.local/share/nextless/sherpa-onnx/
+
+M=https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models
+mkdir -p ~/.local/share/nextless/models
+
+# Zipformer 中英混说（流式 transducer，fp32 约 360 MB）
+curl -LO "$M/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2"
+tar xf sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2 -C ~/.local/share/nextless/models/
+
+# FireRed ASR2 int8（离线 AED，约 1.2 GB，更准更慢）
+curl -LO "$M/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2"
+tar xf sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2 -C ~/.local/share/nextless/models/
+
+rm -f sherpa-onnx-*.tar.bz2
+```
+
+解压出来的目录名和代码里的默认路径完全一致，不需要改名。想放别处就改
+`~/.config/nextless/advanced.json`。
+
+云端后端不需要模型，只要凭据：
+
+```bash
+mkdir -p ~/.config/nextless
+echo '{"api_key":"<火山引擎 APP Key>","resource_id":"volc.seedasr.auc"}' > ~/.config/nextless/doubao.json
+echo '{"api_key":"<sk-...>"}' > ~/.config/nextless/qwen.json
+chmod 600 ~/.config/nextless/*.json
+```
+
+## 使用
+
+| 操作 | 按键 |
+|---|---|
+| 听写 | 按住**你设的触发键** → 说话 → 松手 |
+| 换识别后端 | 按住 **Shift + 触发键**，再按 **← / →** |
+| 换降噪 | 按住 **Shift + 触发键**，再按 **↑ / ↓** |
+
+录音时光标旁的输入法面板显示 `listening → processing audio → recognizing → 文本`。
+松手立即把控制权还给 fcitx5，识别在后台异步进行。
+
+## 后端
+
+| Provider | 类型 | 体积 | 模型 | 实测 |
+|---|---|---|---|---|
+| `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | i7-1260P 8 线程 RTF ≈ 0.13，约 1 GB RSS，无标点 |
+| `fire_red` | 本地 | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | 12 线程 RTF ≈ 0.38，峰值 RSS ~1.7 GB，方言和长句明显更好 |
+| `doubao` | 云端 | — | 豆包流式识别 2.0 | 有标点、数字规整、热词，需要 API key |
+| `qwen` | 云端 | — | Qwen3-ASR-Flash | 需要 API key |
+| `mock` | 测试 | — | — | 固定返回 `hello world`，用来验证按键和采集链路 |
+
+两个本地后端刻意“每句起一个 `sherpa-onnx` 进程”：没有常驻模型服务、没有孤儿进程、没有需要维护的
+预热状态。（仓库里的 `systemd/` 单元是实验性的常驻服务路线，**不是**必需的。）
+
+## 配置文件
+
+| 文件 | 作用 |
+|---|---|
+| `~/.config/fcitx5/conf/nextless.conf` | 触发键（`[Hotkey]`）、`DefaultProvider` |
+| `~/.config/nextless/nextless.json` | `activation_msec`（默认 300）、通知超时、防抖 |
+| `~/.config/nextless/audio.json` | `denoise`：`none` \| `speexdsp` \| `deepfilter` |
+| `~/.config/nextless/advanced.json` | 模型路径、`num_threads`、超时、LUFS 目标、VAD 阈值 |
+| `~/.config/nextless/doubao.json` / `qwen.json` | 云端凭据 |
+| `~/.config/nextless/pa_buffer.json` | 自动探测的 PulseAudio buffer（自生成） |
+
+可从 `config/*.json.example` 复制起步。用户目录优先于 `/etc/nextless/`（打包的默认值），
+首次读取时缺失的用户配置会自动从 `/etc/nextless/` 拷一份，不会覆盖已有文件。
+
+## 开发
+
+```bash
+meson setup build --buildtype=debug -Dwerror=false
+ninja -C build
+meson test -C build            # 9 个单测：注册表、配置回落、采集、队列、curl 取消
+```
+
+- `docs/nextless/` —— 设计文档：交互模型、ASR provider 接口、失败场景分析。
+- `docs/fcitx5/` —— fcitx5 插件与配置系统简介。Nextless 在 `PreInputMethod` 阶段挂钩按键事件，
+  这部分值得先看。
+- `FINDINGS.md` —— 所有调参数字背后的测量记录（buffer 大小、模型延迟、降噪对比）。保留它是因为
+  它解释了默认值为什么是默认值。
+- `tools/` —— 独立小工具：`record_test`、`calibrate_silence`、`tail_loss_test`、
+  `uinput_key`（注入一次合成的“按住某键”，不用手按也能自测 push-to-talk）。
+
+诊断日志（每行一个 JSON，不含音频、不含识别文本、不含 key）默认关闭：
+
+```bash
+meson configure build -Ddiagnostic_logging=true && ninja -C build
+# 输出在 ~/.local/share/nextless/diagnostic.log
+```
+
+## 归属
+
+Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput)**（MIT）。
+音频链路、provider 抽象、多句排队与上屏顺序的设计都来自上游。fork 新增：
+
+- `feat(hotkey)`：触发键从写死的 `CapsLock` 改为 fcitx5 `KeyListOption`，默认右 Ctrl；
+  只有当选了锁定键时才启用 `/dev/uinput` 反弹
+- 更名为 Nextless：插件名、库名、配置与数据路径（`~/.config/nextless`、`~/.local/share/nextless`）
+- `fix(defaults)`：本地 ASR 线程数改为跟随 CPU（不再写死 30）；Zipformer 默认模型目录改成
+  sherpa-onnx 实际发布的压缩包目录名
+
+许可证：**MIT**，见 [LICENSE](LICENSE)（保留了上游版权声明）。
+
+## 后续计划
+
+- [ ] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
+- [ ] 本地后端的热词 / 自定义词组
+- [ ] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）
+- [ ] `.deb` + CI（build × test 矩阵，让 `-Dwerror` 这类问题在发版前暴露）
+- [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
+- [ ] 静音应当是 no-op，而不是 `ASR error: empty result`
+- [ ] 把代码里已经在调用、但仓库缺失的提示音补进来

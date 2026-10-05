@@ -11,7 +11,7 @@
 #include <cstdint>
 #include "asr_provider.h"
 
-namespace vinput {
+namespace nextless {
 
 class QwenAsrProvider : public IAsrProvider {
 public:
@@ -61,4 +61,4 @@ public:
     std::unique_ptr<IAsrProvider> create() override;
 };
 
-} // namespace vinput
+} // namespace nextless

@@ -1,5 +1,5 @@
 #include "qwen_provider.h"
-#include "vinput_config.h"
+#include "nextless_config.h"
 #include "diagnostic_log.h"
 
 #include <curl/curl.h>
@@ -10,7 +10,7 @@
 #include <fstream>
 #include <memory>
 
-namespace vinput {
+namespace nextless {
 
 static std::string base64Encode(const uint8_t *data, size_t len) {
     static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -50,10 +50,10 @@ static size_t writeCb(void *ptr, size_t size, size_t nmemb, std::string *out) {
 static void loadConfig(std::string &apiKey) {
     const char *home = getenv("HOME");
     if (!home) return;
-    std::string path = std::string(home) + "/.config/vinput/qwen.json";
+    std::string path = std::string(home) + "/.config/nextless/qwen.json";
     std::ifstream f(path);
     if (!f) {
-        fprintf(stderr, "Vinput Qwen: no config at %s\n", path.c_str());
+        fprintf(stderr, "Nextless Qwen: no config at %s\n", path.c_str());
         return;
     }
     std::string json((std::istreambuf_iterator<char>(f)),
@@ -143,7 +143,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
                                         AsrResultCallback onR,
                                         AsrErrorCallback onE,
                                         uint64_t diagnosticId) {
-    fprintf(stderr, "Vinput Qwen: recorded %zu samples to %s\n",
+    fprintf(stderr, "Nextless Qwen: recorded %zu samples to %s\n",
             samples.size(), wavPath.c_str());
     diagnosticLog().event("provider", "request_started", {
         {"provider", "qwen"},
@@ -158,7 +158,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "missing_api_key"}
         });
-        if (onE) onE("Qwen: missing api_key in ~/.config/vinput/qwen.json");
+        if (onE) onE("Qwen: missing api_key in ~/.config/nextless/qwen.json");
         return;
     }
 
@@ -236,8 +236,8 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
 
     auto tNetwork = std::chrono::steady_clock::now();
 
-    fprintf(stderr, "Vinput Qwen: HTTP %ld\n", httpCode);
-    fprintf(stderr, "Vinput Qwen: response bytes=%zu\n", respBody.size());
+    fprintf(stderr, "Nextless Qwen: HTTP %ld\n", httpCode);
+    fprintf(stderr, "Nextless Qwen: response bytes=%zu\n", respBody.size());
 
     if (res != CURLE_OK) {
         if (cancel->load()) {
@@ -246,7 +246,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             });
             return;
         }
-        fprintf(stderr, "Vinput Qwen: transport failed, curl=%d (%s)\n",
+        fprintf(stderr, "Nextless Qwen: transport failed, curl=%d (%s)\n",
                 (int)res, curl_easy_strerror(res));
         evictCurlHandle();
         diagnosticLog().event("provider", "request_error", {
@@ -286,7 +286,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     }
 
     auto tParse = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Qwen [timer] encode=%ldms network=%ldms parse=%ldms text_len=%zu\n",
+    fprintf(stderr, "Nextless Qwen [timer] encode=%ldms network=%ldms parse=%ldms text_len=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tNetwork - tEncode).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tNetwork).count(),
@@ -328,4 +328,4 @@ static bool _qwenReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace nextless

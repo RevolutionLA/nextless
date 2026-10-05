@@ -8,7 +8,7 @@
 #include <fcitx/configuration.h>
 
 FCITX_CONFIGURATION(
-    VinputConfig,
+    NextlessConfig,
     fcitx::KeyOption triggerKey{
         this, "TriggerKey", _("Trigger Key"),
         {fcitx::Key("Control+Alt+v")},
@@ -42,9 +42,9 @@ FCITX_CONFIGURATION(
 ## 实现配置读写
 
 ```cpp
-class VinputAddon : public fcitx::AddonInstance {
+class NextlessAddon : public fcitx::AddonInstance {
 public:
-    VinputAddon(fcitx::Instance *instance) : instance_(instance) {
+    NextlessAddon(fcitx::Instance *instance) : instance_(instance) {
         reloadConfig();
     }
 
@@ -62,8 +62,8 @@ public:
     }
 
 private:
-    static constexpr char configFile[] = "conf/vinput.conf";
-    VinputConfig config_;
+    static constexpr char configFile[] = "conf/nextless.conf";
+    NextlessConfig config_;
 };
 ```
 

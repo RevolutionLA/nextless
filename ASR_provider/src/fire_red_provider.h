@@ -7,8 +7,9 @@
 #include <vector>
 #include <cstdint>
 #include "asr_provider.h"
+#include "nextless_config.h"
 
-namespace vinput {
+namespace nextless {
 
 class FireRedAsrProvider : public IAsrProvider {
 public:
@@ -27,8 +28,8 @@ private:
                               uint64_t diagnosticId);
 
     std::string modelDir_;
-    std::string sherpaBin_ = "~/.local/share/vinput/sherpa-onnx/bin/sherpa-onnx-offline";
-    int numThreads_ = 30;
+    std::string sherpaBin_ = "~/.local/share/nextless/sherpa-onnx/bin/sherpa-onnx-offline";
+    int numThreads_ = defaultAsrThreads();
     int timeoutSec_ = 120;
     std::shared_ptr<std::atomic_bool> cancel_ =
         std::make_shared<std::atomic_bool>(false);
@@ -42,4 +43,4 @@ public:
     std::unique_ptr<IAsrProvider> create() override;
 };
 
-} // namespace vinput
+} // namespace nextless

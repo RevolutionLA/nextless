@@ -6,7 +6,7 @@
 #include <vector>
 
 int main() {
-    auto &registry = vinput::AsrProviderRegistry::instance();
+    auto &registry = nextless::AsrProviderRegistry::instance();
     auto factories = registry.listFactories();
 
     bool foundMock = false;

@@ -2,7 +2,7 @@
 
 #include "asr_provider.h"
 
-namespace vinput {
+namespace nextless {
 
 class MockAsrProvider : public IAsrProvider {
 public:
@@ -18,4 +18,4 @@ public:
     }
 };
 
-} // namespace vinput
+} // namespace nextless

@@ -1,4 +1,4 @@
-# Vinput Voice Input Design
+# Nextless Voice Input Design
 
 ## Current Architecture
 
@@ -6,7 +6,7 @@
 fcitx5
   |
   v
-adapter/VinputAddon
+adapter/NextlessAddon
   |-- key lifecycle: CapsLock press/release and switch mode
   |-- provider/denoiser selection and notifications
   |-- AudioCapture lifecycle
@@ -41,8 +41,8 @@ adapter/OutputHandler
 
 ```text
 CapsLock press
-  -> VinputAddon stores timing and input context metadata
-  -> after activation delay, VinputAddon creates provider and AudioCapture
+  -> NextlessAddon stores timing and input context metadata
+  -> after activation delay, NextlessAddon creates provider and AudioCapture
   -> OutputHandler captures the current input context uuid
   -> AudioCapture records and preprocesses audio
 
@@ -52,12 +52,12 @@ CapsLock release
   -> provider calls onResult/onError
   -> OutputHandler::submit(text)
   -> commitString(text)
-  -> VinputAddon restores CapsLock state through uinput
+  -> NextlessAddon restores CapsLock state through uinput
 ```
 
 ## Switch Flow
 
-`Ctrl+CapsLock` enters switch mode without starting audio capture. Horizontal keys switch ASR providers. Vertical keys switch denoisers. Selections are persisted to the existing fcitx config or `~/.config/vinput/audio.json`.
+`Ctrl+CapsLock` enters switch mode without starting audio capture. Horizontal keys switch ASR providers. Vertical keys switch denoisers. Selections are persisted to the existing fcitx config or `~/.config/nextless/audio.json`.
 
 ## Failure Modes
 

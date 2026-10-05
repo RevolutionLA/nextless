@@ -19,7 +19,7 @@ The source directory is intentionally still flat to avoid a high-risk include an
 | Core | `src/asr_provider.h`, `src/asr_provider.cpp` | Provider interface, factory interface, registry, callback contract |
 | Audio | `src/audio_capture.h`, `src/audio_capture.cpp`, `src/buffer_detect.h`, `src/buffer_detect.cpp` | PulseAudio capture, hardware buffer detection, normalization, denoise, VAD trim, WAV writing |
 | Providers | `src/mock_provider.*`, `src/doubao_provider.*`, `src/qwen_provider.*`, `src/zipformer_provider.*`, `src/fire_red_provider.*` | Test, cloud, and local ASR implementations |
-| Support | `src/vinput_config.h`, `src/ws_client.h`, `src/service_helper.h` | Config parsing, WebSocket client helpers, systemd/service helpers |
+| Support | `src/nextless_config.h`, `src/ws_client.h`, `src/service_helper.h` | Config parsing, WebSocket client helpers, systemd/service helpers |
 | Build | `src/meson.build` | Static library, `link_whole` registration retention, external dependency ownership |
 
 ## Dependency Ownership
@@ -49,7 +49,7 @@ Downstream targets should not duplicate these dependencies unless they directly 
 - Audio capture failures must remain in `AudioCapture` and surface through status/error logging or the recorded callback not firing.
 - Provider failures must call `onError` where possible and must not touch fcitx5 input contexts.
 - Desktop focus and text commit are adapter responsibilities and must not be added to provider code.
-- Configuration is loaded from `~/.config/vinput/*.json` first, then packaged defaults under `/etc/vinput/*.json`. Missing user config files are copied from `/etc/vinput/` on first read and existing user files are not overwritten. Repository files under `config/*.json.example` are examples only.
+- Configuration is loaded from `~/.config/nextless/*.json` first, then packaged defaults under `/etc/nextless/*.json`. Missing user config files are copied from `/etc/nextless/` on first read and existing user files are not overwritten. Repository files under `config/*.json.example` are examples only.
 
 ## Verification
 

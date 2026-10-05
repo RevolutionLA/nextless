@@ -1,5 +1,5 @@
 #include "fire_red_provider.h"
-#include "vinput_config.h"
+#include "nextless_config.h"
 #include "diagnostic_log.h"
 
 #include <unistd.h>
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace vinput {
+namespace nextless {
 
 static std::string expandPath(const std::string &p) {
     if (!p.empty() && p[0] == '~') {
@@ -27,7 +27,7 @@ static std::string expandPath(const std::string &p) {
 }
 
 FireRedAsrProvider::FireRedAsrProvider()
-    : modelDir_("~/.local/share/vinput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26") {
+    : modelDir_("~/.local/share/nextless/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26") {
     auto adv = advancedSection("fire_red");
     if (!adv.empty()) {
         auto d = jsonStr(adv, "model_dir");
@@ -190,7 +190,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         close(pipefd[0]);
 
         if (!reaped) {
-            fprintf(stderr, "Vinput FireRed: waitpid failed\n");
+            fprintf(stderr, "Nextless FireRed: waitpid failed\n");
             unlink(wav.c_str());
             if (onE) onE("FireRed: recognition failed");
             return;
@@ -198,7 +198,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         auto tRecv = std::chrono::steady_clock::now();
 
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            fprintf(stderr, "Vinput FireRed: child exit=%d\n",
+            fprintf(stderr, "Nextless FireRed: child exit=%d\n",
                     WIFEXITED(status) ? WEXITSTATUS(status) : -1);
             unlink(wav.c_str());
             if (onE) onE("FireRed: recognition failed");
@@ -215,7 +215,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         }
 
         auto tParse = std::chrono::steady_clock::now();
-        fprintf(stderr, "Vinput FireRed [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
+        fprintf(stderr, "Nextless FireRed [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecv - t0).count(),
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
@@ -252,4 +252,4 @@ static bool _frReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace nextless

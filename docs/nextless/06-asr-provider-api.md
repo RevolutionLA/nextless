@@ -15,7 +15,7 @@ AudioCapture -> samples + wavPath -> IAsrProvider::transcribe() -> onResult/onEr
 ```cpp
 // ASR_provider/src/asr_provider.h
 
-namespace vinput {
+namespace nextless {
 
 using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
 using AsrErrorCallback = std::function<void(const std::string &error)>;
@@ -41,7 +41,7 @@ public:
     virtual std::unique_ptr<IAsrProvider> create() = 0;
 };
 
-} // namespace vinput
+} // namespace nextless
 ```
 
 ## Lifecycle
@@ -72,7 +72,7 @@ Recording state and status text belong to `AudioCapture`, not `IAsrProvider`.
 Provider factories self-register during static initialization. The ASR static library is linked with `link_whole` so those registration objects are retained.
 
 ```cpp
-auto &reg = vinput::AsrProviderRegistry::instance();
+auto &reg = nextless::AsrProviderRegistry::instance();
 auto list = reg.listFactories();
 auto asr = reg.create("mock");
 ```
@@ -82,8 +82,8 @@ auto asr = reg.create("mock");
 | ID | Name | Input | External dependency |
 |----|------|-------|---------------------|
 | `mock` | Mock (test) | generated samples or empty WAV path | none |
-| `doubao` | Doubao AUC | WAV path / encoded WAV | API key in `~/.config/vinput/doubao.json` |
-| `qwen` | Qwen3-ASR-Flash | WAV path / Data URL | API key in `~/.config/vinput/qwen.json` |
+| `doubao` | Doubao AUC | WAV path / encoded WAV | API key in `~/.config/nextless/doubao.json` |
+| `qwen` | Qwen3-ASR-Flash | WAV path / Data URL | API key in `~/.config/nextless/qwen.json` |
 | `zipformer` | Local Zipformer | WAV path / local binary | sherpa-onnx binary and model files |
 | `fire_red` | Local FireRed | WAV path / local binary | sherpa-onnx-offline binary and model files |
 
@@ -99,7 +99,7 @@ auto asr = reg.create("mock");
 ```cpp
 #include "asr_provider.h"
 
-class MyProvider : public vinput::IAsrProvider {
+class MyProvider : public nextless::IAsrProvider {
 public:
     void transcribe(std::vector<int16_t> samples,
                     const std::string &wavPath) override {
@@ -108,17 +108,17 @@ public:
     }
 };
 
-class MyProviderFactory : public vinput::IAsrProviderFactory {
+class MyProviderFactory : public nextless::IAsrProviderFactory {
 public:
     std::string id() const override { return "my-provider"; }
     std::string name() const override { return "My ASR Provider"; }
-    std::unique_ptr<vinput::IAsrProvider> create() override {
+    std::unique_ptr<nextless::IAsrProvider> create() override {
         return std::make_unique<MyProvider>();
     }
 };
 
 static bool myRegistered = []() {
-    vinput::AsrProviderRegistry::instance().registerFactory(
+    nextless::AsrProviderRegistry::instance().registerFactory(
         std::make_unique<MyProviderFactory>());
     return true;
 }();
@@ -129,7 +129,7 @@ static bool myRegistered = []() {
 The adapter creates a provider at activation time, records audio through `AudioCapture`, then calls `transcribe()` from the recorded callback.
 
 ```cpp
-asr_ = vinput::AsrProviderRegistry::instance().create(providerId);
+asr_ = nextless::AsrProviderRegistry::instance().create(providerId);
 asr_->setResultCallback([this](const std::string &text, bool isFinal) {
     if (outputHandler_ && isFinal) outputHandler_->submit(text);
 });
@@ -137,7 +137,7 @@ asr_->setErrorCallback([this](const std::string &error) {
     onAsrError(error);
 });
 
-audioCapture_ = std::make_unique<vinput::AudioCapture>();
+audioCapture_ = std::make_unique<nextless::AudioCapture>();
 audioCapture_->setRecordedCallback([this](const std::vector<int16_t> &samples,
                                            const std::string &wavPath) {
     if (asr_) asr_->transcribe(samples, wavPath);

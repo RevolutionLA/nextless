@@ -54,7 +54,7 @@ bool testNormalCompletion(const std::filesystem::path &root,
     std::string result;
     std::string error;
 
-    auto provider = std::make_unique<vinput::FireRedAsrProvider>();
+    auto provider = std::make_unique<nextless::FireRedAsrProvider>();
     provider->setResultCallback([&](const std::string &text, bool) {
         std::lock_guard<std::mutex> lock(mutex);
         result = text;
@@ -91,7 +91,7 @@ bool testHungChildCancellation(const std::filesystem::path &root,
         root, "fake-sherpa-hung", "trap '' TERM\nsleep 30\n");
     writeConfig(configPath, root, fakeSherpa);
 
-    auto provider = std::make_unique<vinput::FireRedAsrProvider>();
+    auto provider = std::make_unique<nextless::FireRedAsrProvider>();
     provider->transcribe({}, (root / "hung.wav").string());
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -116,8 +116,8 @@ bool testCallbackRelease(const std::filesystem::path &root,
     std::mutex mutex;
     std::condition_variable ready;
     bool completed = false;
-    std::unique_ptr<vinput::FireRedAsrProvider> provider =
-        std::make_unique<vinput::FireRedAsrProvider>();
+    std::unique_ptr<nextless::FireRedAsrProvider> provider =
+        std::make_unique<nextless::FireRedAsrProvider>();
     provider->setResultCallback([&](const std::string &, bool) {
         provider.reset();
         std::lock_guard<std::mutex> lock(mutex);
@@ -140,8 +140,8 @@ int main() {
     namespace fs = std::filesystem;
 
     const char *tmp = std::getenv("MESON_TEST_TMPDIR");
-    fs::path root = (tmp && *tmp) ? tmp : "/tmp/vinput-provider-lifetime";
-    fs::path configDir = root / ".config/vinput";
+    fs::path root = (tmp && *tmp) ? tmp : "/tmp/nextless-provider-lifetime";
+    fs::path configDir = root / ".config/nextless";
     fs::create_directories(configDir);
 
     setenv("HOME", root.c_str(), 1);

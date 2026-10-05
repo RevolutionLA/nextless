@@ -1,4 +1,4 @@
-#include "vinput_config.h"
+#include "nextless_config.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -17,13 +17,13 @@ static void writeFile(const fs::path &path, const std::string &content) {
 
 int main() {
     auto base = fs::temp_directory_path() /
-                ("vinput-config-test-" + std::to_string(getpid()));
+                ("nextless-config-test-" + std::to_string(getpid()));
     auto userDir = base / "user";
     auto systemDir = base / "system";
 
     writeFile(systemDir / "audio.json", "{\"denoise\":\"none\"}");
-    auto fallback = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
-    if (vinput::jsonStr(fallback, "denoise") != "none") {
+    auto fallback = nextless::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (nextless::jsonStr(fallback, "denoise") != "none") {
         std::cerr << "system fallback was not used\n";
         fs::remove_all(base);
         return 1;
@@ -35,22 +35,22 @@ int main() {
     }
 
     writeFile(userDir / "audio.json", "{\"denoise\":\"speexdsp\"}");
-    auto user = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
-    if (vinput::jsonStr(user, "denoise") != "speexdsp") {
+    auto user = nextless::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (nextless::jsonStr(user, "denoise") != "speexdsp") {
         std::cerr << "user config did not override system fallback\n";
         fs::remove_all(base);
         return 1;
     }
 
     writeFile(systemDir / "audio.json", "{\"denoise\":\"deepfilter\"}");
-    auto preserved = vinput::readConfigFileFromDirs("audio.json", userDir, systemDir);
-    if (vinput::jsonStr(preserved, "denoise") != "speexdsp") {
+    auto preserved = nextless::readConfigFileFromDirs("audio.json", userDir, systemDir);
+    if (nextless::jsonStr(preserved, "denoise") != "speexdsp") {
         std::cerr << "existing user config was overwritten\n";
         fs::remove_all(base);
         return 1;
     }
 
-    if (!vinput::readConfigFileFromDirs("missing.json", userDir, systemDir).empty()) {
+    if (!nextless::readConfigFileFromDirs("missing.json", userDir, systemDir).empty()) {
         std::cerr << "missing config should return empty content\n";
         fs::remove_all(base);
         return 1;

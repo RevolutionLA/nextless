@@ -9,7 +9,7 @@
 #include <functional>
 #include <pulse/pulseaudio.h>
 
-namespace vinput {
+namespace nextless {
 
 class AudioCapture {
 public:
@@ -71,4 +71,4 @@ private:
     RecordedCallback onRecorded_;
 };
 
-} // namespace vinput
+} // namespace nextless

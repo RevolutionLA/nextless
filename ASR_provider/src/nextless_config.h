@@ -7,14 +7,25 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include <curl/curl.h>
 
-namespace vinput {
+namespace nextless {
+
+// 本地 ASR 的默认推理线程数。onnxruntime 的线程数超过物理核数只会带来
+// 调度抖动，30 这种写死的值在笔记本上尤其糟；跟随 CPU、上限 12。
+// 需要覆盖时改 ~/.config/nextless/advanced.json 里的 num_threads。
+inline int defaultAsrThreads() {
+    unsigned hc = std::thread::hardware_concurrency();
+    if (hc < 4) hc = 4;
+    if (hc > 12) hc = 12;
+    return static_cast<int>(hc);
+}
 
 inline std::string configDir() {
     const char *h = getenv("HOME");
-    return h ? std::string(h) + "/.config/vinput" : "/tmp/vinput_cfg";
+    return h ? std::string(h) + "/.config/nextless" : "/tmp/nextless_cfg";
 }
 
 inline std::string configPath(const std::string &name) {
@@ -22,7 +33,7 @@ inline std::string configPath(const std::string &name) {
 }
 
 inline std::string systemConfigDir() {
-    return "/etc/vinput";
+    return "/etc/nextless";
 }
 
 inline std::string readFileIfExists(const std::string &path) {
@@ -165,4 +176,4 @@ private:
     std::shared_ptr<std::atomic_bool> cancel_;
 };
 
-} // namespace vinput
+} // namespace nextless
