@@ -15,6 +15,12 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- `config/advanced.json.example` no longer contradicts the built-in defaults it shadows: the
+  zipformer `model_dir` pointed at `.../models/zipformer-zh-en`, a directory no download step
+  creates (the README unpacks `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20`), and
+  both sections pinned `num_threads` back to the old hardcoded 30. Now that the build installs
+  these files and the loader copies them into `~/.config/nextless/` on first read, a wrong value
+  here would silently override the fix.
 - The packaged default configs are installed for real now: `meson install` ships the five
   `config/*.json.example` files, renamed to `*.json`, into the build's `sysconfdir`/nextless —
   `/etc/nextless` for distro builds (the PKGBUILD passes `--sysconfdir=/etc`), `/usr/local/etc/nextless`
