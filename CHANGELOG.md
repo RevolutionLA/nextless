@@ -15,6 +15,11 @@ user-visible change rather than one per commit.
   the top of both READMEs.
 
 ### Fixed
+- The temporary WAV of an utterance is now deleted *before* the result/error callback fires, in all
+  four providers (`temp_wav.h`). Previously the deletion lived in a scope guard, so "the callback
+  fired" no longer implied "the file is gone" — `cloud_provider_queue` failed intermittently in CI's
+  debug job, and the same window existed on every early return in the local providers. Reproduced
+  deterministically with `taskset -c 0` (15/15 failures on the old code, 0/15 after the fix).
 - Build on older distros: the adapter dropped its `fcitx-utils/eventloopinterface.h` include. That
   header only exists in recent fcitx5 releases; the one thing it was commented as providing
   (`now()`) is actually `std::chrono::steady_clock::now()`, and `event.h` already gives us

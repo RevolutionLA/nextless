@@ -49,6 +49,12 @@ bool testProvider(const std::filesystem::path &root, const std::string &name) {
         return false;
     }
     for (const auto &path : paths) {
+        // Contract, not a race: the provider deletes the temp WAV *before* it invokes the
+        // callback, so by the time both callbacks have fired the files must be gone (temp_wav.h).
+        // This assertion is what caught the previous scope-guard ordering, where the deletion
+        // happened on return and lost the race whenever the worker thread was scheduled against
+        // the main thread. Reproduce that shape with: taskset -c 0 ./build/tests/test_cloud_provider_queue
+        // (15/15 failures on the old code, 0/15 after the fix).
         if (std::filesystem::exists(path)) {
             std::cerr << name << " left temporary WAV " << path << "\n";
             return false;
