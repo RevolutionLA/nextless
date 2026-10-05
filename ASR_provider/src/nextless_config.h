@@ -56,11 +56,24 @@ inline bool fileExists(const std::string &path) {
 }
 
 inline void copyFileIfMissing(const std::string &src, const std::string &dst) {
-    if (!fileExists(src) || fileExists(dst)) return;
+    if (!fileExists(src)) {
+        // 系统配置目录缺失（例如 DESTDIR 安装不完整）时记录警告
+        fprintf(stderr, "Nextless: packaged config missing: %s\n", src.c_str());
+        return;
+    }
+    if (fileExists(dst)) return;
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(dst).parent_path(), ec);
-    if (ec) return;
+    if (ec) {
+        fprintf(stderr, "Nextless: cannot create config dir for %s: %s\n",
+                dst.c_str(), ec.message().c_str());
+        return;
+    }
     std::filesystem::copy_file(src, dst, std::filesystem::copy_options::none, ec);
+    if (ec) {
+        fprintf(stderr, "Nextless: cannot copy %s to %s: %s\n",
+                src.c_str(), dst.c_str(), ec.message().c_str());
+    }
 }
 
 inline std::string readConfigFileFromDirs(const std::string &name,

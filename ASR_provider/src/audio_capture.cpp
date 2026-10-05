@@ -96,22 +96,41 @@ static std::string secureCaptureDir() {
     const char *xdg = getenv("XDG_RUNTIME_DIR");
     if (!xdg || !*xdg) xdg = "/tmp"; // fallback
 
-    std::string dir = std::string(xdg) + "/nextless";
-    struct stat st;
-    if (stat(dir.c_str(), &st) != 0) {
-        // 目录不存在，创建它
-        if (mkdir(dir.c_str(), 0700) != 0) {
-            fprintf(stderr, "Nextless Capture: cannot create %s: %s\n",
-                    dir.c_str(), strerror(errno));
+    std::string dir;
+    bool useMkdtemp = (strcmp(xdg, "/tmp") == 0);
+
+    if (useMkdtemp) {
+        // Fallback 到 /tmp 时使用 mkdtemp 创建不可预测的目录名
+        std::string tpl = std::string(xdg) + "/nextless_XXXXXX";
+        std::vector<char> buf(tpl.begin(), tpl.end());
+        buf.push_back('\0');
+        char *result = mkdtemp(buf.data());
+        if (!result) {
+            fprintf(stderr, "Nextless Capture: cannot create temp dir in %s: %s\n",
+                    xdg, strerror(errno));
             return "";
         }
-    } else if (!S_ISDIR(st.st_mode)) {
-        // 存在但不是目录（可能是 symlink attack）
-        fprintf(stderr, "Nextless Capture: %s exists but is not a directory\n", dir.c_str());
-        return "";
-    } else {
-        // 目录已存在，确保权限是 0700
+        dir = result;
         chmod(dir.c_str(), 0700);
+    } else {
+        // $XDG_RUNTIME_DIR 是可信的，使用固定路径
+        dir = std::string(xdg) + "/nextless";
+        struct stat st;
+        if (stat(dir.c_str(), &st) != 0) {
+            // 目录不存在，创建它
+            if (mkdir(dir.c_str(), 0700) != 0) {
+                fprintf(stderr, "Nextless Capture: cannot create %s: %s\n",
+                        dir.c_str(), strerror(errno));
+                return "";
+            }
+        } else if (!S_ISDIR(st.st_mode)) {
+            // 存在但不是目录（可能是 symlink attack）
+            fprintf(stderr, "Nextless Capture: %s exists but is not a directory\n", dir.c_str());
+            return "";
+        } else {
+            // 目录已存在，确保权限是 0700
+            chmod(dir.c_str(), 0700);
+        }
     }
     return dir;
 }
@@ -662,18 +681,41 @@ bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
                       + std::to_string(dfSeq++) + "_XXXXXX.wav";
     std::vector<char> name(tpl.begin(), tpl.end());
     name.push_back('\0');
-    // 使用 mkstemp 生成唯一文件名但不创建文件（writeWav 会用 O_EXCL 创建）
-    int dummyFd = mkstemps(name.data(), 4);
-    if (dummyFd < 0) return giveUp("cannot generate a unique temp filename");
-    close(dummyFd);
-    unlink(name.data()); // 删除 mkstemps 创建的文件，让 writeWav 重新创建
+    // 使用 mkstemps 创建文件并获取 fd，直接写入 WAV 数据，避免 unlink+recreate 的 race window
+    int tmpFd = mkstemps(name.data(), 4);
+    if (tmpFd < 0) return giveUp("cannot create a temp wav");
     const std::string tmp48k(name.data());
     struct Cleanup {
         const std::string &path;
         ~Cleanup() { unlink(path.c_str()); }
     } cleanup{tmp48k};
 
-    writeWav(samples48k, tmp48k, 48000);
+    // 将 fd 转换为 FILE* 供 writeWav 使用（writeWav 内部会 fclose）
+    FILE *f = fdopen(tmpFd, "wb");
+    if (!f) {
+        close(tmpFd);
+        return giveUp("cannot open temp wav for writing");
+    }
+
+    // 直接写入 WAV 头和数据
+    long dataSize = (long)samples48k.size() * 2;
+    fwrite("RIFF", 1, 4, f);
+    uint32_t chunkSize = 36 + (uint32_t)dataSize;
+    fwrite(&chunkSize, 4, 1, f);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    uint32_t sub1 = 16, sr = 48000, br = 48000 * 2;
+    uint16_t fmtTag = 1, ch = 1, bps = 16, ba = 2;
+    fwrite(&sub1, 4, 1, f); fwrite(&fmtTag, 2, 1, f);
+    fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f);
+    fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f);
+    fwrite(&bps, 2, 1, f);
+    fwrite("data", 1, 4, f);
+    uint32_t ds = (uint32_t)dataSize;
+    fwrite(&ds, 4, 1, f);
+    fwrite(samples48k.data(), 2, samples48k.size(), f);
+    fclose(f); // 关闭文件，deep-filter 可以读取
+
     const uint64_t writtenHash = fnv1a(samples48k);
 
     pid_t pid = -1;
