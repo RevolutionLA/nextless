@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage question
+    url: https://github.com/RevolutionLA/nextless/discussions
+    body: How do I bind a key / which model should I pick / does it work on Hyprland — ask in Discussions instead of opening an issue.
+  - name: Security report
+    url: https://github.com/RevolutionLA/nextless/security/advisories/new
+    body: Please report anything that could leak audio, keystrokes or API keys privately, as described in SECURITY.md.

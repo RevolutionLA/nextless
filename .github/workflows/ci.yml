@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/*', 'fix/*', 'chore/*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + test (${{ matrix.buildtype }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        buildtype: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ meson ninja-build git pkg-config \
+            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+            libpulse-dev libebur128-dev libcurl4-openssl-dev \
+            libspeexdsp-dev libsoxr-dev \
+            pulseaudio
+        # NOTE: no `libfcitx5-dev` meta package exists in Ubuntu — the fcitx5
+        # development files ship as the four split packages above (verified on
+        # jammy/noble/questing/resolute). libpulse-dev also provides the
+        # libpulse-simple pkg-config file. Debian names may differ; send a patch.
+
+      - name: Start a headless PulseAudio server
+        run: |
+          # Unit tests construct AudioCapture, which opens a real capture stream.
+          # A null sink gives them something to record from in a headless runner.
+          pulseaudio --daemonize=no --exit-idle-time=-1 --log-target=stderr &
+          for i in $(seq 1 20); do pactl info >/dev/null 2>&1 && break; sleep 0.5; done
+          pactl load-module module-null-sink sink_name=nextless_ci source_output=0 || true
+          pactl info
+
+      - name: Configure
+        # -Dwerror stays ON (it is the project default): a new warning must fail CI.
+        run: meson setup build --buildtype=${{ matrix.buildtype }}
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Test
+        run: meson test -C build --print-errorlogs
+
+      - name: Report test summary
+        if: always()
+        run: cat build/meson-logs/testlog.txt
+
+      - name: Upload Meson logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-${{ matrix.os }}-${{ matrix.buildtype }}
+          path: build/meson-logs/
+          if-no-files-found: ignore
+
+  diagnostics-configuration:
+    name: opt-in diagnostics still compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ meson ninja-build git pkg-config \
+            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+            libpulse-dev libebur128-dev libcurl4-openssl-dev \
+            libspeexdsp-dev libsoxr-dev
+      - name: Configure with NEXTLESS_DIAGNOSTICS_ENABLED
+        run: meson setup build-diag -Ddiagnostic_logging=true
+      - name: Build
+        run: ninja -C build-diag

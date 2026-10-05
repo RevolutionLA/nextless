@@ -1,0 +1,78 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the detailed report. Push-to-talk bugs are usually about the
+        **key**, the **microphone**, or the **ASR backend**, so please say which
+        of the three you already ruled out.
+
+  - type: input
+    id: version
+    attributes:
+      label: Nextless version
+      description: output of `meson introspection --project-info build | grep version`, or the git commit you built from
+      placeholder: 0.2.0 / main@abcdef1
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, desktop + session type, fcitx5 version, audio server
+      placeholder: Ubuntu 26.04, GNOME 50 on Wayland, fcitx5 5.1.19, PipeWire 1.x
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: ASR backend
+      options: [zipformer, fire_red, doubao, qwen, mock, unknown]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: Trigger key
+      options: [Control_R, Control_L, Alt_R, Alt_L, Super_L, CapsLock, other / combination]
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected. Include the input-panel text verbatim.
+      placeholder: |
+        1. Hold Right Ctrl, say "今天天气不错"
+        2. Panel shows "listening", then goes blank on release
+        3. Expected the text at the cursor; nothing was committed
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: fcitx5 log around the failure
+      description: |
+        Run `fcitx5 --replace --verbose=verbose 2>&1 | tee /tmp/f5.log`, reproduce once,
+        then paste the block between `Nextless [press]` and the next `Nextless ASR state: off`.
+        **Paste text, not screenshots**, and no API keys.
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I verified the microphone works in another app (e.g. `pw-record test.wav`)
+        - label: I tried the `mock` backend, so the failure is not the key/capture path
+        - label: I tried `fcitx5 -r -d` after editing any config file
+        - label: I searched existing issues, including closed ones

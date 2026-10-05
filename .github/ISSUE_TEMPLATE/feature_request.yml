@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose new behaviour, a backend, or packaging
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Nextless has a deliberately narrow scope: **hold a key, speak, text appears at the
+        cursor, in any desktop app, without a daemon.** Requests that need a background
+        service, a tray app or an Electron shell are usually a better fit elsewhere.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing and why it matters
+      description: The workflow you cannot do today. A concrete sentence beats a feature list.
+      placeholder: |
+        Dictating into a terminal: commit works, but the trailing newline is swallowed, so I
+        have to press Enter manually after every command.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Which layer (adapter / ASR_provider / audio pipeline / packaging) and how far you would take it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which area does this touch?
+      options:
+        - trigger key / input-panel UX
+        - audio pipeline (capture, loudness, denoise, VAD)
+        - ASR backend (local or cloud)
+        - punctuation / text post-processing
+        - packaging / CI / docs
+        - something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What did you try instead
+      description: Other tools, other backends, config you toggled in advanced.json.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Contribution
+      options:
+        - label: I would send a PR for this (even a rough one)
+        - label: I can test on hardware or distros others do not have (aarch64, PipeWire-only, KDE, Hyprland)
+        - label: I can supply a labelled audio sample set for benchmarking
