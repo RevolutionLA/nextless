@@ -13,3 +13,11 @@ test_audio_file = executable('test_audio_file',
 test_uinput_caps = executable('test_uinput_caps',
   'test_uinput_caps.cpp',
   install: false)
+
+# Issue #5: first-run model helper. Installed as nextless-get-models so the
+# README path from `meson install` to working dictation needs no hand-written
+# curl (PKGBUILD's meson install picks this up automatically).
+install_data('get_models.sh',
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+  rename: 'nextless-get-models')

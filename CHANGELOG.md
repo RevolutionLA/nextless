@@ -13,6 +13,18 @@ user-visible change rather than one per commit.
 - Issue and PR templates, `CONTRIBUTING.md`, `SECURITY.md`, `.editorconfig`.
 - Badges (CI / release / license / bilingual docs) and cross-links to the contribution docs at
   the top of both READMEs.
+- `nextless-get-models` (`tools/get_models.sh`): first-run model helper closing the step where
+  new users bail (issue #5). Detects the CPU architecture (x86_64 / aarch64 map to their exact
+  v1.13.8 asset names — the aarch64 `-shared-cpu` variant is not derivable from the x64 name),
+  reports download sizes before fetching, asks Zipformer / FireRed / both, is idempotent, and
+  stages inside `~/.local/share/nextless/` so a failed download leaves no half-extracted model
+  — extracted directories are checked against the names `advanced.json` expects before anything
+  moves into place. `--dry-run` and `--arch=` make the URL mapping testable without ARM hardware;
+  a contract test (`test_get_models`) runs the install / skip / corrupt-archive / wrong-directory
+  legs against fake `file://` release trees. Installed via `meson install` into the bindir, so
+  PKGBUILD packages pick it up automatically. The missing-runtime/-model panel messages now name
+  this command instead of pointing at the README, whose section 4 leads with the one-liner and
+  keeps the manual curl block as the do-it-yourself alternative.
 
 ### Fixed
 - First run without the offline pieces is now actionable. Both local providers check the

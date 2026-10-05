@@ -126,10 +126,10 @@ deepfilter off until fcitx5 restarts.
 Returns "hello world" immediately. For testing without network.
 .TP
 \fBZipformer\fP (sherpa-onnx)
-Local offline model (~100MB). Requires \fBsherpa-onnx\fP binary.
+Local offline streaming model (~360 MB). Requires \fBsherpa-onnx\fP binary, both installed by \fBnextless-get-models\fP.
 .TP
 \fBFireRed\fP (sherpa-onnx-offline)
-Local offline AED model (~1.2GB). Requires \fBsherpa-onnx-offline\fP binary.
+Local offline AED model (~1.2 GB unpacked). Requires \fBsherpa-onnx-offline\fP binary, both installed by \fBnextless-get-models\fP.
 .TP
 \fBDoubao\fP (ByteDance Volcengine)
 Cloud API. Requires \fBdoubao.json\fP with API key and resource ID.
@@ -164,9 +164,10 @@ Trigger key and default ASR backend (fcitx5 add-on settings).
 .I ~/.config/nextless/
 Configuration directory.
 .TP
-.TP
 .I ~/.local/share/nextless/
-Local ASR models and sherpa-onnx binaries.
+Local ASR models and sherpa-onnx binaries; installed by
+.B nextless-get-models
+(see README, "Get models (local backends)").
 .TP
 .I ~/.local/share/nextless/sounds/
 Optional replacements for the notification sounds (activate, deactivate, switch).
