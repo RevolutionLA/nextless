@@ -239,6 +239,10 @@ While dictating, the input panel beside the cursor shows `listening → processi
 recognizing → text`. Releasing the key returns control to fcitx5 immediately; recognition runs
 asynchronously.
 
+Running Nextless next to a typing IME (WeChat IME, fcitx5 pinyin)? The tested combinations and
+the exact key-grab rules are in [docs/coexistence.md](docs/coexistence.md); `scripts/smoke-coexistence.sh`
+checks a machine end to end in under a minute.
+
 ## Backends
 
 | Provider | Type | Disk | Model | Notes |
@@ -286,6 +290,8 @@ Tests need a PulseAudio server (the capture tests open a real stream); on a head
 - `docs/nextless/` — design notes: interaction model, ASR provider API, failure analysis.
 - `docs/fcitx5/` — a short primer on the fcitx5 add-on and configuration system, since Nextless
   hooks key events at `PreInputMethod` phase.
+- `docs/coexistence.md` — running Nextless next to a typing IME (wetype, pinyin): tested
+  combinations and the exact key-grab rules ([中文](docs/coexistence.zh.md)).
 - `FINDINGS.md` — the measurement log behind the tuning numbers (buffer sizes, model latency,
   denoiser comparisons). Kept because it explains *why* defaults are what they are.
 - `tools/` — standalone harnesses: `record_test`, `calibrate_silence`, `tail_loss_test`,
