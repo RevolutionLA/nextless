@@ -21,6 +21,21 @@ English README: [README.md](README.md)
   ─────────────────────────────────────────▶  文字出现在光标处
 ```
 
+## 项目目标
+
+**Nextless 要补上 Linux（优先 Ubuntu）桌面缺的那套「高级输入体验」——语音只是入口，不是全部。**
+
+做完的标准是，一个 Linux 用户能：
+
+1. **装得上**：一条命令安装，也能卸干净，不留残余；
+2. **立刻能用**：模型、提示音、默认触发键都已就位，不需要手工下载文件；
+3. **是「我自己的」**：触发键、识别后端、降噪、提示音全部可替换——可玩可改正是这个 fork 存在的理由；
+4. **信得过**：每个提交都过 CI，失败路径有测试兜底，错误只出现在输入法面板里，绝不进你的文档。
+
+今天的形态是**语音优先的 fcitx5 插件**；方向是把 Linux 上真正的高级输入套件缺的环节补齐：离线
+识别的标点与润色、首次运行的引导、真正的发行包、以及和打字侧输入法（你本来就在用的中文输入法）
+的舒适共存。**不做的**：再造一个输入法内核，或自营任何云服务。
+
 ## 为什么要做这个
 
 Linux 上的语音转文字工具不少，但**不打断你工作的听写**很少：
@@ -264,6 +279,24 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 
 ## 后续计划
 
+在 [GitHub Issues](https://github.com/RevolutionLA/nextless/issues) 里跟踪的是具体待办，
+下面是方向。
+
+### 按「能不能装、能不能交接」排序（2026-10-05 审查）
+
+每条都写了完成标准，谁接手都知道做到什么程度算完。
+
+| | 事项 | 完成标准 |
+|---|---|---|
+| 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。 | 两种构建都绿；断言允许「先回调、后清理」这个合法顺序 |
+| 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。 | meson 把 `config/*.json.example` 装到 `/etc/nextless`，或者文档不再这么承诺 |
+| 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。 | 输入法面板直接说明缺哪一块、去哪拿（也是下面向导的前置） |
+| 4 | **真正的安装与卸载路径**：先 `.deb`（依赖、模型获取、干净卸载），再 AUR。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |
+| 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。 | 用真实二进制跑一句 10 秒音频，记录墙钟与 RTF——否则就把它下架 |
+| 6 | **与打字侧输入法共存**：写清支持的组合（wetype、fcitx5 拼音）和抢键规则。 | 一份短文档，外加每个组合一次冒烟验证 |
+
+方向清单：
+
 - [ ] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
 - [ ] 本地后端的热词 / 自定义词组
 - [ ] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）
@@ -275,6 +308,3 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [x] 静音是 no-op：不再报 `ASR error: empty result`，FireRed 的 `<sil>` 也不会进文档
 - [x] 提示音已随包附带（`tools/gen_sounds.py` 可重新生成）
 - [x] DeepFilterNet3 作为可选降噪：外部进程有超时上限，失败一律退回 speexdsp
-
-在 [GitHub Issues](https://github.com/RevolutionLA/nextless/issues) 里跟踪的是具体待办，
-上面这一节是方向。

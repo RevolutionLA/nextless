@@ -21,6 +21,27 @@ and nothing else about your keyboard behaviour changes.
   ─────────────────────────────────────────────────▶  your text, at the cursor
 ```
 
+## Goal
+
+**Nextless is the Linux (Ubuntu-first) answer to the "advanced input suite" that Windows and
+macOS users get for free — voice is the entry point, not the whole story.**
+
+The project is done when a Linux user can:
+
+1. **install it** with one command, and uninstall it without leaving debris behind;
+2. **dictate immediately** — model, sounds and a sane trigger key already in place, nothing to
+   fetch by hand;
+3. **make it theirs** — trigger key, ASR backend, denoiser and notification sounds are all
+   user-swappable; being hackable is the reason this fork exists;
+4. **trust it** — every commit is built by CI, the failure paths have tests, and no error ever
+   lands in the document.
+
+Today that is a *voice-first fcitx5 add-on*. The direction is to close the remaining gaps of a
+real input suite on Linux: punctuation and polish on top of offline recognition, a first-run
+experience, real packages, and comfortable coexistence with the typing side of the desk
+(the Chinese IME you already use). **Non-goals:** writing another input-method engine, or
+running a cloud service of our own.
+
 ## Why this exists
 
 Linux has plenty of speech-to-text, but very little *dictation that stays out of your way*:
@@ -290,6 +311,21 @@ License: **MIT** — see [LICENSE](LICENSE), which retains the upstream copyrigh
 
 Active work is tracked as [GitHub Issues](https://github.com/RevolutionLA/nextless/issues);
 the list below is the direction, not the queue.
+
+### Ordered by the goal, not by fun (review, 2026-10-05)
+
+Each item has a finish line, so whoever picks it up knows when it is done.
+
+| | Item | Done when |
+|---|---|---|
+| 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. | CI is green in both build types; the assertion tolerates the legitimate callback-then-cleanup order |
+| 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. | meson ships `config/*.json.example` to `/etc/nextless`, or the docs stop promising it |
+| 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. | the input panel names the missing piece and where to get it (feeds the wizard below) |
+| 4 | **Real install and removal path**: `.deb` first (dependency list, model fetch, clean uninstall), AUR after. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
+| 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. | one 10 s utterance with the real binary, wall-clock and RTF recorded — or the option is retired |
+| 6 | **Coexistence with the typing-side IME**: document the supported combinations (wetype, fcitx5 pinyin) and the key-collision rules. | a short doc plus one smoke test per combination |
+
+The longer-term list:
 
 - [ ] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
 - [ ] Hotwords / custom phrases for the local backends
