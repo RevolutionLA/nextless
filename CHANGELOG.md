@@ -13,6 +13,10 @@ user-visible change rather than one per commit.
 - Issue and PR templates, `CONTRIBUTING.md`, `SECURITY.md`, `.editorconfig`.
 - Badges (CI / release / license / bilingual docs) and cross-links to the contribution docs at
   the top of both READMEs.
+- `docs/coexistence.md` (+ `.zh.md`) and `scripts/smoke-coexistence.sh`: the tested combinations
+  with typing IMEs (WeChat IME, fcitx5 pinyin) and the exact key-grab rules, plus a one-command
+  check — environment checks by default, a real trigger tap/hold per IME with `--inject`, and a
+  full speaker→mic dictation with `--dictate`.
 
 ### Fixed
 - First run without the offline pieces is now actionable. Both local providers check the

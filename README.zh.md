@@ -212,6 +212,10 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 录音时光标旁的输入法面板显示 `listening → processing audio → recognizing → 文本`。
 松手立即把控制权还给 fcitx5，识别在后台异步进行。
 
+和打字侧输入法（微信输入法、fcitx5 拼音）共用一台机器：已验证的组合与抢键规则见
+[docs/coexistence.zh.md](docs/coexistence.zh.md)；`scripts/smoke-coexistence.sh` 一分钟内就能
+端到端验完一台机器。
+
 ## 后端
 
 | Provider | 类型 | 体积 | 模型 | 实测 |
@@ -258,6 +262,8 @@ meson test -C build            # 12 个单测：注册表、配置回落、采�
 - `docs/nextless/` —— 设计文档：交互模型、ASR provider 接口、失败场景分析。
 - `docs/fcitx5/` —— fcitx5 插件与配置系统简介。Nextless 在 `PreInputMethod` 阶段挂钩按键事件，
   这部分值得先看。
+- `docs/coexistence.zh.md` —— 与打字侧输入法（微信输入法、拼音）共存：已验证的组合与按键归谁
+  （[English](docs/coexistence.md)）。
 - `FINDINGS.md` —— 所有调参数字背后的测量记录（buffer 大小、模型延迟、降噪对比）。保留它是因为
   它解释了默认值为什么是默认值。
 - `tools/` —— 独立小工具：`record_test`、`calibrate_silence`、`tail_loss_test`、
