@@ -42,6 +42,11 @@ test_denoise_fallback = executable('test_denoise_fallback',
   'test_denoise_fallback.cpp',
   dependencies: [asr_provider_dep])
 
+test_missing_components = executable('test_missing_components',
+  'test_missing_components.cpp',
+  include_directories: include_directories('../adapter/src'),
+  dependencies: [asr_provider_dep])
+
 test('asr_registry', test_asr_registry)
 test('audio_capture_file', test_audio_capture_file)
 test('buffer_detect_cache', test_buffer_detect_cache)
@@ -53,3 +58,4 @@ test('cloud_provider_queue', test_cloud_provider_queue)
 test('diagnostic_log', test_diagnostic_log)
 test('no_speech', test_no_speech)
 test('denoise_fallback', test_denoise_fallback, timeout: 30)
+test('missing_components', test_missing_components)

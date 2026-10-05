@@ -146,6 +146,13 @@ int main() {
 
     setenv("HOME", root.c_str(), 1);
     auto configPath = configDir / "advanced.json";
+
+    // FireRed 现在会在 spawn 前预检模型文件是否存在; 这个测试的假脚本不看模型
+    // 内容, 给三个占位文件即可走到 spawn/回调路径 (缺文件的失败路径见
+    // test_missing_components)。
+    for (const char *name : {"encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"}) {
+        std::ofstream(root / name) << "placeholder";
+    }
     return testNormalCompletion(root, configPath) &&
                    testHungChildCancellation(root, configPath) &&
                    testCallbackRelease(root, configPath)

@@ -170,6 +170,10 @@ rm -f sherpa-onnx-*.tar.bz2
 解压出来的目录名和代码里的默认路径完全一致，不需要改名。想放别处就改
 `~/.config/nextless/advanced.json`。
 
+听写时如果运行时或某个模型文件缺失，输入法面板会直接说缺的是哪一块、并指回本节对应的
+下载步骤——不再是干巴巴的 `spawn failed` / `recognition failed`；它实际找过的路径会写进
+fcitx5 日志。
+
 云端后端不需要模型，只要凭据：
 
 ```bash
@@ -245,7 +249,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 11 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落
+meson test -C build            # 12 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
@@ -293,7 +297,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 |---|---|---|
 | 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。**已修复，[#10](https://github.com/RevolutionLA/nextless/pull/10)**——四个 provider 现在都在回调触发前删掉临时 WAV（用 `taskset -c 0` 复现：15/15 → 0/15 失败）。 | ✅ 两种构建都绿；修复比这条完成标准更严——「先回调、后清理」已不合法，断言保持严格而非放宽 |
 | 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。**已修复，[#11](https://github.com/RevolutionLA/nextless/pull/11)**——meson 现在把示例以 `*.json` 装进构建时的 `sysconfdir`/nextless，并把同一路径编译进 loader，安装与读取不可能再漂移；CI 会做 staged install，五个文件少装一个就红。 | ✅ meson 确实会装——发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`），普通源码安装是 `/usr/local/etc/nextless`，与 loader 读取的路径同源 |
-| 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。 | 输入法面板直接说明缺哪一块、去哪拿（也是下面向导的前置） |
+| 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。**已修复，[#12](https://github.com/RevolutionLA/nextless/pull/12)**——provider 在 spawn 前预检运行时与每个模型文件，报出具体路径；面板显示「sherpa-onnx runtime missing / offline model missing」并指向 README（`test_missing_components` 用假 `$HOME` 覆盖全部四条失败路径）。 | ✅ 面板说清缺哪一块、并指到 README 的下载小节；实际找过的路径进 fcitx5 日志（也是下面向导的前置） |
 | 4 | **真正的安装与卸载路径**：先 `.deb`（依赖、模型获取、干净卸载），再 AUR。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |
 | 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。 | 用真实二进制跑一句 10 秒音频，记录墙钟与 RTF——否则就把它下架 |
 | 6 | **与打字侧输入法共存**：写清支持的组合（wetype、fcitx5 拼音）和抢键规则。 | 一份短文档，外加每个组合一次冒烟验证 |
