@@ -41,15 +41,17 @@ public:
     void setDenoiseMethod(const std::string &method) { denoiseMethod_ = method; }
 
     static void processSamples(std::vector<int16_t> &samples, const std::string &denoiser);
-    static void writeWav(const std::vector<int16_t> &samples, const std::string &path);
+    static void writeWav(const std::vector<int16_t> &samples, const std::string &path,
+                         uint32_t sampleRate = 16000);
+    static void applyDenoise(std::vector<int16_t> &samples, const std::string &method);
+    // 成功返回 true; false 表示这段音频没被 DeepFilterNet 处理, 调用方需要退回到 speexdsp
+    static bool dfDenoise(std::vector<int16_t> &samples);
 
 private:
     void recordLoop();
     static void contextStateCallback(pa_context *context, void *userdata);
     static void streamStateCallback(pa_stream *stream, void *userdata);
     static void streamReadCallback(pa_stream *stream, size_t bytes, void *userdata);
-    static void applyDenoise(std::vector<int16_t> &samples, const std::string &method);
-    static void dfDenoise(std::vector<int16_t> &samples);
     static double normalizeSamples(std::vector<int16_t> &samples);
     static bool hasVoice(const std::vector<int16_t> &samples);
     static void trimSilence(std::vector<int16_t> &samples);

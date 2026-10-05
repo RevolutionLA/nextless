@@ -110,6 +110,16 @@ Denoiser selection.
 {"denoise": "speexdsp"}   \fR# none | speexdsp | deepfilter\fP
 .fi
 .RE
+.TP
+\fBdeepfilter\fP (optional)
+Runs the \fBdeep-filter\fP CLI from DeepFilterNet as an external process. It is
+looked up in \fB~/.local/share/nextless/bin/deep-filter\fP, or wherever the
+environment variable \fBNEXTLESS_DEEP_FILTER\fP points. Audio is resampled to
+48 kHz for the model and back to 16 kHz for the recogniser.
+Spawning, runtime and result are all bounded: if the binary is missing, fails,
+exceeds 5 seconds (it is then killed) or returns the audio unchanged, that
+utterance falls back to speexdsp, and three consecutive failures switch
+deepfilter off until fcitx5 restarts.
 .SH ASR PROVIDERS
 .TP
 \fBMock\fP
@@ -132,7 +142,7 @@ Recorded audio goes through:
 .nf
 PulseAudio capture
   \(-> ebur128 loudness normalization (-16 LUFS)
-  \(-> denoising (speexdsp or deepfilter)
+  \(-> denoising (speexdsp, or deepfilter when installed)
   \(-> VAD-based silence trimming
   \(-> WAV output
   \(-> ASR recognition

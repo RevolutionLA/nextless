@@ -46,8 +46,8 @@ clipboard round-trip, no focus stealing.
   Streaming ASR 2.0, Qwen3-ASR) and a mock for testing. Switch with Shift+trigger and ←/→;
   switch denoiser with ↑/↓.
 - **A real audio pipeline**, not a raw mic dump: PulseAudio capture → EBU R128 loudness
-  normalisation (−16 LUFS) → speexdsp or DeepFilterNet denoising → VAD silence trimming with a
-  retained tail so the last syllable is never clipped.
+  normalisation (−16 LUFS) → denoising (speexdsp by default, DeepFilterNet3 if you install it) →
+  VAD silence trimming with a retained tail so the last syllable is never clipped.
 - **Audible state changes.** Starting, stopping and switching backend each get a short sound, so
   you never have to look at the panel to know the key took effect. Drop your own `activate.wav`,
   `deactivate.wav` or `switch.wav` into `~/.local/share/nextless/sounds/` to replace them; they are
@@ -167,6 +167,29 @@ echo '{"api_key":"<sk-...>"}' > ~/.config/nextless/qwen.json
 chmod 600 ~/.config/nextless/*.json
 ```
 
+### 5. Optional: DeepFilterNet3 denoiser
+
+speexdsp ships with the build, and it is enough for a quiet room. For a noisy one you can hand
+Nextless the `deep-filter` CLI from
+[DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) — it is deliberately *not* a build
+dependency, because it is a ~100 MB model plus a Rust binary:
+
+```bash
+mkdir -p ~/.local/share/nextless/bin
+# whatever works for you: the release tarball, or `pip install deepfilternet`
+ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
+```
+
+Any location works as long as you point at it, either with the path above or with
+`NEXTLESS_DEEP_FILTER=/usr/bin/deep-filter` in the fcitx5 environment. Turn it on with
+Shift+trigger and ↑/↓ (persisted to `~/.config/nextless/audio.json`).
+
+Nextless resamples to 48 kHz for the model and back to 16 kHz for the recogniser. Because the
+denoiser is an external process, it is treated as untrusted: if the binary is missing, exits with
+an error, wedges (killed after 5 s) or hands the audio back unchanged, that utterance falls back
+to speexdsp instead of losing your words — and after three failures in a row DeepFilterNet is
+switched off for the rest of the session. `meson test` covers all four cases.
+
 ## Usage
 
 | Action | Keys |
@@ -200,6 +223,7 @@ experimental resident-server path and are **not** required.)
 | `~/.config/fcitx5/conf/nextless.conf` | trigger key (`[Hotkey]`), `DefaultProvider` |
 | `~/.config/nextless/nextless.json` | `activation_msec` (default 300), notification timeout, debounce |
 | `~/.config/nextless/audio.json` | `denoise`: `none` \| `speexdsp` \| `deepfilter` |
+| `NEXTLESS_DEEP_FILTER` (env) | path to a system `deep-filter` binary, overrides the bundled location |
 | `~/.config/nextless/advanced.json` | model dirs, `num_threads`, timeouts, LUFS target, VAD thresholds |
 | `~/.config/nextless/doubao.json` / `qwen.json` | API credentials |
 | `~/.config/nextless/pa_buffer.json` | auto-detected PulseAudio buffer size (self-generated) |
@@ -256,3 +280,4 @@ License: **MIT** — see [LICENSE](LICENSE), which retains the upstream copyrigh
 - [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
 - [x] Silence is a no-op — no `ASR error: empty result`, and FireRed's `<sil>` never reaches the document
 - [x] Notification sounds ship with the package (`tools/gen_sounds.py` regenerates them)
+- [x] DeepFilterNet3 as an opt-in denoiser, with a bounded subprocess and a speexdsp fallback

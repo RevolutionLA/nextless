@@ -18,6 +18,12 @@
 #include <filesystem>
 #include <ebur128.h>
 #include <cstdlib>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
+
+extern char **environ;
 
 namespace nextless {
 
@@ -413,12 +419,95 @@ void AudioCapture::recordLoop() {
     });
 }
 
+namespace {
+// DeepFilterNet 是选装的重型降噪器: 模型加载慢、CPU 占用高, 而且经常压根没装。
+// 它必须永远有退路 —— 超时、进程失败、文件没被改动都退回 speexdsp,
+// 绝不能让一次录音挂在子进程上, 更不能让音频静默绕过降噪。
+constexpr int kDfTimeoutMs = 5000;
+constexpr int kDfMaxConsecutiveFailures = 3;
+
+// 打包者/发行版可以用 NEXTLESS_DEEP_FILTER 指向系统里的 deep-filter,
+// 否则用随包安装在 ~/.local/share/nextless/bin 的那一份。
+std::string dfBinaryPath() {
+    const char *env = getenv("NEXTLESS_DEEP_FILTER");
+    if (env && *env && access(env, X_OK) == 0) return std::string(env);
+    const char *home = getenv("HOME");
+    if (!home) return {};
+    std::string candidate = std::string(home) + "/.local/share/nextless/bin/deep-filter";
+    return access(candidate.c_str(), X_OK) == 0 ? candidate : std::string();
+}
+
+std::string dfTempDir() {
+    const char *xdg = getenv("XDG_RUNTIME_DIR");
+    if (xdg && *xdg && access(xdg, W_OK) == 0) return std::string(xdg);
+    return "/tmp";
+}
+
+uint64_t fnv1a(const void *data, size_t len) {
+    const auto *bytes = static_cast<const unsigned char *>(data);
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < len; i++) {
+        h ^= bytes[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+uint64_t fnv1a(const std::vector<int16_t> &v) {
+    return fnv1a(v.data(), v.size() * sizeof(int16_t));
+}
+
+// 读回一个 PCM WAV: 按 chunk 找 fmt/data, 不假设头部正好 44 字节 —— deep-filter
+// 之外任何实现加一个 metadata chunk 都会让写死的偏移读出错位的音频。
+bool readWavPcm(const std::string &path, std::vector<int16_t> &out, uint32_t &sampleRate) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::vector<char> bytes((std::istreambuf_iterator<char>(f)),
+                            std::istreambuf_iterator<char>());
+    if (bytes.size() < 12) return false;
+    if (memcmp(bytes.data(), "RIFF", 4) != 0 || memcmp(bytes.data() + 8, "WAVE", 4) != 0)
+        return false;
+
+    uint32_t channels = 0, sr = 0, bps = 0;
+    size_t dataOffset = 0, dataBytes = 0;
+    bool haveFmt = false, haveData = false;
+
+    size_t pos = 12;
+    while (pos + 8 <= bytes.size()) {
+        uint32_t size = 0;
+        memcpy(&size, bytes.data() + pos + 4, 4);
+        const size_t payload = pos + 8;
+        if (payload + size > bytes.size()) size = (uint32_t)(bytes.size() - payload);
+        const char *id = bytes.data() + pos;
+        if (size >= 16 && memcmp(id, "fmt ", 4) == 0) {
+            memcpy(&channels, bytes.data() + payload + 2, 2);
+            memcpy(&sr, bytes.data() + payload + 4, 4);
+            memcpy(&bps, bytes.data() + payload + 14, 2);
+            haveFmt = true;
+        } else if (memcmp(id, "data", 4) == 0) {
+            dataOffset = payload;
+            dataBytes = size;
+            haveData = true;
+        }
+        pos = payload + size + (size & 1);
+    }
+
+    if (!haveFmt || !haveData || sr == 0 || bps != 16 || channels != 1) return false;
+    if (dataBytes > bytes.size() - dataOffset) dataBytes = bytes.size() - dataOffset;
+    out.assign(dataBytes / sizeof(int16_t), 0);
+    if (out.empty()) return false;
+    memcpy(out.data(), bytes.data() + dataOffset, out.size() * sizeof(int16_t));
+    sampleRate = sr;
+    return true;
+}
+
+} // namespace
+
 void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string &method) {
     if (method.empty() || method == "none") return;
 
     if (method == "deepfilter") {
-        dfDenoise(samples);
-        return;
+        if (dfDenoise(samples)) return;
     }
     auto t0 = std::chrono::steady_clock::now();
 
@@ -449,26 +538,41 @@ void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string
             samples.size());
 }
 
-void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
+bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     std::lock_guard<std::mutex> lock(deepFilterMutex);
     auto t0 = std::chrono::steady_clock::now();
 
-    // Lazy-start deep-filter daemon with --stay (model loaded once)
-    static FILE *daemonPipe = nullptr;
-    static bool daemonStartFailed = false;
-    if (!daemonPipe && !daemonStartFailed) {
-        std::string cmd = std::string(getenv("HOME") ? getenv("HOME") : "/tmp")
-                          + "/.local/share/nextless/bin/deep-filter"
-                          + " --stay -D -o /tmp 2>/dev/null";
-        daemonPipe = popen(cmd.c_str(), "w");
-        if (daemonPipe) {
-            fprintf(stderr, "Nextless DF: daemon started\n");
-            setvbuf(daemonPipe, nullptr, _IONBF, 0);
-        } else {
-            fprintf(stderr, "Nextless DF: daemon start failed, falling back to one-shot\n");
-            daemonStartFailed = true;
+    static uint64_t dfSeq = 0;
+    static int dfFailures = 0;
+    static bool dfDisabled = false;
+
+    auto giveUp = [&](const char *msg) -> bool {
+        fprintf(stderr, "Nextless DF: %s\n", msg);
+        diagnosticLog().event("audio", "denoise_fallback", {
+            {"denoiser", "deepfilter"},
+            {"reason", msg},
+            {"consecutive_failures", std::to_string(dfFailures + 1)}
+        });
+        if (dfFailures + 1 >= kDfMaxConsecutiveFailures) {
+            dfDisabled = true;
+            fprintf(stderr, "Nextless DF: disabled, staying on speexdsp for this session\n");
         }
+        ++dfFailures;
+        return false;
+    };
+
+    const std::string binary = dfBinaryPath();
+    if (binary.empty()) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            fprintf(stderr, "Nextless DF: deep-filter not installed "
+                            "(~/.local/share/nextless/bin/deep-filter), using speexdsp\n");
+        }
+        return false;
     }
+    if (dfDisabled) return false;
+    if (samples.empty()) return true;
 
     // Resample 16kHz → 48kHz
     size_t inLen = samples.size();
@@ -481,74 +585,92 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     std::vector<float> fout(outLen48k);
     soxr_error_t err;
     soxr_t resampler = soxr_create(16000, 48000, 1, &err, nullptr, nullptr, nullptr);
-    if (err) { fprintf(stderr, "Nextless DF: soxr create error\n"); return; }
+    if (err) return giveUp("soxr create error");
 
     size_t consumed, generated;
     err = soxr_process(resampler, fin.data(), fin.size(), &consumed,
                        fout.data(), fout.size(), &generated);
     soxr_delete(resampler);
-    if (err) { fprintf(stderr, "Nextless DF: soxr process error\n"); return; }
+    if (err) return giveUp("soxr process error");
 
     std::vector<int16_t> samples48k(generated);
     for (size_t i = 0; i < generated; i++)
         samples48k[i] = (int16_t)std::clamp((int)(fout[i] * 32768.0f), -32768, 32767);
 
-    // Write 48kHz WAV temp
-    std::string tmp48k = "/tmp/nextless_df_" + std::to_string(getpid()) + "_48k.wav";
-    writeWav(samples48k, tmp48k);
+    // 每次调用一个独立临时文件: 并发录音不会互相覆盖
+    const std::string tmpDir = dfTempDir();
+    std::string tpl = tmpDir + "/nextless_df_" + std::to_string(getpid()) + "_"
+                      + std::to_string(dfSeq++) + "_XXXXXX.wav";
+    std::vector<char> name(tpl.begin(), tpl.end());
+    name.push_back('\0');
+    const int tmpFd = mkstemps(name.data(), 4);
+    if (tmpFd < 0) return giveUp("cannot create a temp wav");
+    close(tmpFd);
+    const std::string tmp48k(name.data());
+    struct Cleanup {
+        const std::string &path;
+        ~Cleanup() { unlink(path.c_str()); }
+    } cleanup{tmp48k};
 
-    if (daemonPipe) {
-        // Feed path to daemon's stdin, then poll for file modification
-        fprintf(daemonPipe, "%s\n", tmp48k.c_str());
-        fflush(daemonPipe);
-        auto before = std::filesystem::last_write_time(tmp48k);
-        for (int i = 0; i < 100; i++) {
-            usleep(2000);
-            auto now = std::filesystem::last_write_time(tmp48k);
-            if (now != before) break;
-        }
-    } else {
-        // Fallback: one-shot mode
-        std::string cmd = std::string(getenv("HOME") ? getenv("HOME") : "/tmp")
-                          + "/.local/share/nextless/bin/deep-filter"
-                          + " -D -o /tmp " + tmp48k + " 2>/dev/null";
-        (void)!std::system(cmd.c_str());
+    writeWav(samples48k, tmp48k, 48000);
+    const uint64_t writtenHash = fnv1a(samples48k);
+
+    pid_t pid = -1;
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0600);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0600);
+    const char *argv[] = {binary.c_str(), "-D", "-o", tmpDir.c_str(), tmp48k.c_str(), nullptr};
+    const int spawnErr = posix_spawn(&pid, binary.c_str(), &actions, nullptr,
+                                     const_cast<char *const *>(argv), environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawnErr != 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "could not start deep-filter: %s", strerror(spawnErr));
+        return giveUp(msg);
     }
 
-    // Read back 48kHz WAV
-    {
-        std::ifstream f(tmp48k, std::ios::binary);
-        if (f) {
-            f.seekg(0, std::ios::end);
-            size_t size = f.tellg();
-            if (size < 44) {
-                fprintf(stderr, "Nextless DF: processed file too small (%zu bytes)\n", size);
-                unlink(tmp48k.c_str());
-                return;
-            }
-            f.seekg(44, std::ios::beg);
-            size_t dataSize = size - 44;
-            samples48k.resize(dataSize / 2);
-            f.read(reinterpret_cast<char *>(samples48k.data()), dataSize);
+    // 有界等待: 超时必须杀掉进程, 不能把调用线程挂在死掉的模型上
+    int status = 0;
+    for (;;) {
+        const pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) break;
+        if (done < 0) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            return giveUp("waitpid failed");
         }
+        if (std::chrono::steady_clock::now() - t0 > std::chrono::milliseconds(kDfTimeoutMs)) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            return giveUp("timed out, deep-filter killed");
+        }
+        usleep(10 * 1000);
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return giveUp("deep-filter exited with an error");
     }
 
-    unlink(tmp48k.c_str());
+    std::vector<int16_t> denoised;
+    uint32_t denoisedRate = 0;
+    if (!readWavPcm(tmp48k, denoised, denoisedRate)) return giveUp("processed wav is unreadable");
+    if (fnv1a(denoised) == writtenHash) return giveUp("audio came back unchanged");
+    dfFailures = 0;
 
-    // Resample 48kHz → 16kHz
-    std::vector<float> f48k(samples48k.size());
-    for (size_t i = 0; i < samples48k.size(); i++) f48k[i] = samples48k[i] / 32768.0f;
+    // Resample 处理后的采样率 → 16kHz
+    std::vector<float> fIn(denoised.size());
+    for (size_t i = 0; i < denoised.size(); i++) fIn[i] = denoised[i] / 32768.0f;
 
-    size_t outLen16k = (size_t)(f48k.size() / ratio) + 64;
+    size_t outLen16k = (size_t)(fIn.size() * 16000.0 / denoisedRate) + 64;
     std::vector<float> f16k(outLen16k);
 
-    resampler = soxr_create(48000, 16000, 1, &err, nullptr, nullptr, nullptr);
+    resampler = soxr_create(denoisedRate, 16000, 1, &err, nullptr, nullptr, nullptr);
     if (!err) {
-        err = soxr_process(resampler, f48k.data(), f48k.size(), &consumed,
+        err = soxr_process(resampler, fIn.data(), fIn.size(), &consumed,
                            f16k.data(), f16k.size(), &generated);
         soxr_delete(resampler);
     }
-    if (err) { fprintf(stderr, "Nextless DF: soxr downsample error\n"); return; }
+    if (err) return giveUp("soxr downsample error");
 
     samples.resize(generated);
     for (size_t i = 0; i < generated; i++)
@@ -558,6 +680,7 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     fprintf(stderr, "Nextless Capture [timer] df_denoise=%ldms samples=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
             samples.size());
+    return true;
 }
 
 std::vector<int16_t> AudioCapture::takeSamples() {
@@ -716,7 +839,8 @@ void AudioCapture::trimSilence(std::vector<int16_t> &samples) {
             trimStart, origSize - trimEnd, origSize, samples.size());
 }
 
-void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::string &path) {
+void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::string &path,
+                            uint32_t sampleRate) {
     auto t0 = std::chrono::steady_clock::now();
 
     FILE *f = fopen(path.c_str(), "wb");
@@ -731,7 +855,7 @@ void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::stri
     fwrite(&chunkSize, 4, 1, f);
     fwrite("WAVE", 1, 4, f);
     fwrite("fmt ", 1, 4, f);
-    uint32_t sub1 = 16, sr = 16000, br = 32000;
+    uint32_t sub1 = 16, sr = sampleRate, br = sampleRate * 2;
     uint16_t fmtTag = 1, ch = 1, bps = 16, ba = 2;
     fwrite(&sub1, 4, 1, f); fwrite(&fmtTag, 2, 1, f);
     fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f);

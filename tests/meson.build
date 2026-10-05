@@ -38,6 +38,10 @@ test_no_speech = executable('test_no_speech',
   'test_no_speech.cpp',
   dependencies: [asr_provider_dep])
 
+test_denoise_fallback = executable('test_denoise_fallback',
+  'test_denoise_fallback.cpp',
+  dependencies: [asr_provider_dep])
+
 test('asr_registry', test_asr_registry)
 test('audio_capture_file', test_audio_capture_file)
 test('buffer_detect_cache', test_buffer_detect_cache)
@@ -48,3 +52,4 @@ test('audio_capture_stop', test_audio_capture_stop)
 test('cloud_provider_queue', test_cloud_provider_queue)
 test('diagnostic_log', test_diagnostic_log)
 test('no_speech', test_no_speech)
+test('denoise_fallback', test_denoise_fallback, timeout: 30)

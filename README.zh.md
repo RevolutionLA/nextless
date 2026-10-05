@@ -40,7 +40,7 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
   [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)），两个云端（豆包流式 2.0、Qwen3-ASR），
   一个 mock 用于自测。`Shift+触发键` 后按 ←/→ 换后端，↑/↓ 换降噪。
 - **完整的音频链路**，不是把麦克风原始数据直接丢给模型：PulseAudio 采集 → EBU R128 响度归一
-  （−16 LUFS）→ speexdsp 或 DeepFilterNet 降噪 → VAD 静音裁剪，并保留一小段尾音，最后一个字不会被切掉。
+  （−16 LUFS）→ 降噪（默认 speexdsp，装了 DeepFilterNet3 也能用）→ VAD 静音裁剪，并保留一小段尾音，最后一个字不会被切掉。
 - **听得见的状态变化。** 起录、松手、换后端各有一声短提示，不用盯面板就知道键生效了。想换成自己的
   音色，把 `activate.wav` / `deactivate.wav` / `switch.wav` 放进 `~/.local/share/nextless/sounds/`
   即可；随包的三个音由 `tools/gen_sounds.py` 生成。
@@ -148,6 +148,24 @@ echo '{"api_key":"<sk-...>"}' > ~/.config/nextless/qwen.json
 chmod 600 ~/.config/nextless/*.json
 ```
 
+### 5. 可选：DeepFilterNet3 降噪
+
+speexdsp 随构建一起装好，安静环境够用。环境吵就把 DeepFilterNet 的
+`deep-filter` 命令行交给它 —— 刻意不做成构建依赖，因为它带着约 100 MB 模型和一个 Rust 二进制：
+
+```bash
+mkdir -p ~/.local/share/nextless/bin
+# 发行版 tar 包、或者 pip install deepfilternet，任选
+ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
+```
+
+不放这个路径也行，用 `NEXTLESS_DEEP_FILTER=/usr/bin/deep-filter` 指过去（需要写进 fcitx5 的运行
+环境）。开关是 `Shift+触发键` 后按 ↑/↓，选择会写进 `~/.config/nextless/audio.json`。
+
+Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。因为降噪是外部进程，一律当成不可信：
+二进制不存在、非零退出、卡住（5 秒后杀掉）或者原样把音频退回来，这一句都会退回 speexdsp 而不是
+丢掉你说的话；连续失败三次，本次会话就不再尝试。这四种情况都有 `meson test` 覆盖。
+
 ## 使用
 
 | 操作 | 按键 |
@@ -179,6 +197,7 @@ chmod 600 ~/.config/nextless/*.json
 | `~/.config/fcitx5/conf/nextless.conf` | 触发键（`[Hotkey]`）、`DefaultProvider` |
 | `~/.config/nextless/nextless.json` | `activation_msec`（默认 300）、通知超时、防抖 |
 | `~/.config/nextless/audio.json` | `denoise`：`none` \| `speexdsp` \| `deepfilter` |
+| `NEXTLESS_DEEP_FILTER`（环境变量） | 指向系统里的 `deep-filter`，优先于默认安装路径 |
 | `~/.config/nextless/advanced.json` | 模型路径、`num_threads`、超时、LUFS 目标、VAD 阈值 |
 | `~/.config/nextless/doubao.json` / `qwen.json` | 云端凭据 |
 | `~/.config/nextless/pa_buffer.json` | 自动探测的 PulseAudio buffer（自生成） |
@@ -232,3 +251,4 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
 - [x] 静音是 no-op：不再报 `ASR error: empty result`，FireRed 的 `<sil>` 也不会进文档
 - [x] 提示音已随包附带（`tools/gen_sounds.py` 可重新生成）
+- [x] DeepFilterNet3 作为可选降噪：外部进程有超时上限，失败一律退回 speexdsp
