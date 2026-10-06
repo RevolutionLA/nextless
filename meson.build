@@ -37,7 +37,8 @@ install_data('config/doubao.json.example',
   'config/audio.json.example',
   'config/nextless.json.example',
   'config/advanced.json.example',
-  rename: ['doubao.json', 'qwen.json', 'audio.json', 'nextless.json', 'advanced.json'],
+  'config/hotwords.json.example',
+  rename: ['doubao.json', 'qwen.json', 'audio.json', 'nextless.json', 'advanced.json', 'hotwords.json'],
   install_dir: config_install_dir)
 add_project_arguments('-DNEXTLESS_PACKAGED_CONFIG_DIR="' + config_install_dir + '"',
   language: 'cpp')

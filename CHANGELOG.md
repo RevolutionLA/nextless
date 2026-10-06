@@ -8,6 +8,19 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- Hotwords / mishearing correction table (issue #6): `~/.config/nextless/hotwords.json`
+  maps `{"what it heard": "what you meant"}` (e.g. Zipformer's habit of turning
+  `礼拜二` into `LIBR`). The table post-processes the final text of **every** backend,
+  local and cloud, before punctuation: single simultaneous pass, longest key wins at
+  each position, replacements are never re-matched (`A→B` plus `B→C` cannot turn `A`
+  into `C`). Missing, empty or malformed file = documented no-op; edits take effect
+  on the next utterance without a restart (the table is cached by file content, so
+  nothing is parsed per keypress). The packaged template contains only `YOUR_`
+  placeholder keys — dropped at parse time — so the first-run copy can never rewrite
+  real speech. `test_hotwords` covers parse/apply/bounds/caching; `hotwords.json` is
+  the sixth installed config and the CI staged-install guard now checks all six.
+  Per-model biasing (sherpa-onnx `--hotword` on Zipformer, issue #6 option 2) stays
+  open — it needs a measured CER delta, not an assumed one.
 - GitHub Actions CI: build (debug + release) with `-Dwerror` left on, full unit suite against a
   headless PulseAudio null sink, plus a job that keeps the opt-in diagnostics build compiling.
 - Issue and PR templates, `CONTRIBUTING.md`, `SECURITY.md`, `.editorconfig`.

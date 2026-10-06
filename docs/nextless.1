@@ -95,12 +95,18 @@ All tuning parameters in one file. Sections:
 .IR doubao ,
 .IR qwen ,
 .IR zipformer ,
-.IR fire_red .
+.IR fire_red ,
+.IR punctuation .
 See default values in the distributed example.
 .PP
 For Doubao, \fBpoll_interval_msec\fP is the normal result polling interval.
 The first query is sent after 300ms to improve short-utterance latency; later
 queries use the configured interval.
+.TP
+\fBhotwords.json\fP (optional)
+Mishearing correction table, \fB{"what it heard": "what you meant"}\fP.
+Applied literally to the final text of every backend, before punctuation.
+See ASR PROVIDERS below.
 .SS Audio
 .TP
 \fBaudio.json\fP
@@ -136,6 +142,15 @@ Cloud API. Requires \fBdoubao.json\fP with API key and resource ID.
 .TP
 \fBQwen\fP (Alibaba DashScope)
 Cloud API. Requires \fBqwen.json\fP with API key.
+.TP
+\fBHotwords\fP (post-processing, every backend)
+The final text of any backend is first passed through the replacement table
+in \fBhotwords.json\fP (e.g. \fB{"LIBR": "礼拜二"}\fP): longest key wins at each
+position, replacements are never re-matched, and a missing, empty or
+malformed file rewrites nothing. The packaged template only contains
+\fBYOUR_\fP placeholder keys, which are dropped when parsing, so first-run
+copies cannot alter real speech. Editing the file takes effect on the next
+utterance.
 .TP
 \fBPunctuation\fP (optional post-processing)
 Local backend results can be run through \fBsherpa-onnx-offline-punctuation\fP
