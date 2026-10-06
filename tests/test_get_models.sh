@@ -17,13 +17,18 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 V=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' "$script")
 ZIPDIR=$(sed -n 's/^ZIPFORMER_DIR="\([^"]*\)".*/\1/p' "$script")
 FIRDIR=$(sed -n 's/^FIRERED_DIR="\([^"]*\)".*/\1/p' "$script")
+PUNDIR=$(sed -n 's/^PUNCT_DIR="\([^"]*\)".*/\1/p' "$script")
 
 # --- constants vs advanced.json.example --------------------------------------
 cfg="$here/../config/advanced.json.example"
-cfg_zip=$(sed -n 's|.*"model_dir": ".*models/\([^"]*\)".*|\1|p' "$cfg" | head -1)
-cfg_fir=$(sed -n 's|.*"model_dir": ".*models/\([^"]*\)".*|\1|p' "$cfg" | tail -1)
+cfg_zip=$(sed -n 's|.*"model_dir": ".*models/\(sherpa-onnx-streaming-zipformer[^"]*\)".*|\1|p' "$cfg")
+cfg_fir=$(sed -n 's|.*"model_dir": ".*models/\(sherpa-onnx-fire-red[^"]*\)".*|\1|p' "$cfg")
 [ "$ZIPDIR" = "$cfg_zip" ] || fail "script Zipformer dir '$ZIPDIR' != advanced.json.example '$cfg_zip'"
-[ "$FIRDIR" = "$cfg_fir" ] || fail "script FireRed dir '$FIRDIR' != advanced.json.example '$FIRDIR'"
+[ "$FIRDIR" = "$cfg_fir" ] || fail "script FireRed dir '$FIRDIR' != advanced.json.example '$cfg_fir'"
+
+cfg_punct=$(sed -n 's|.*"model_dir": ".*models/\(sherpa-onnx-punct[^"]*\)".*|\1|p' "$cfg")
+[ -n "$cfg_punct" ] || fail "advanced.json.example lost its punctuation section"
+[ "$PUNDIR" = "$cfg_punct" ] || fail "script PUNCT_DIR '$PUNDIR' != advanced.json default '$cfg_punct'"
 
 # --- dry-run URL mapping -------------------------------------------------------
 out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --arch=x86_64 --backend=both)
@@ -37,6 +42,11 @@ fi
 if NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --arch=riscv64 >/dev/null 2>&1; then
     fail "unknown arch should exit non-zero"
 fi
+# punctuation opt-in comes from the punctuation-models tag, only with the flag
+out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --backend=zipformer --punctuation)
+grep -q "punctuation-models/$PUNDIR.tar.bz2" <<<"$out" || fail "punctuation URL wrong"
+out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --backend=zipformer)
+if grep -q "Punct" <<<"$out"; then fail "punctuation shown without --punctuation"; fi
 
 # --- fake release trees ---------------------------------------------------------
 tmp=$(mktemp -d)
@@ -52,6 +62,12 @@ chmod +x "$tmp/stage/$rt_top/bin/"*
 : > "$tmp/stage/$rt_top/lib/libonnxruntime.so.1.13.1"
 tar -cjf "$rel/$rt_top.tar.bz2" -C "$tmp/stage" "$rt_top"
 
+mkdir -p "$tmp/stage/$PUNDIR"
+for f in model.int8.onnx tokens.json config.yaml; do
+    echo "fake" > "$tmp/stage/$PUNDIR/$f"
+done
+tar -cjf "$models/$PUNDIR.tar.bz2" -C "$tmp/stage" "$PUNDIR"
+
 mkdir -p "$tmp/stage/$ZIPDIR"
 for f in encoder-epoch-99-avg-1.onnx decoder-epoch-99-avg-1.onnx \
          joiner-epoch-99-avg-1.onnx tokens.txt; do
@@ -62,7 +78,7 @@ tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
 export HOME="$tmp/home"
 DATA="$HOME/.local/share/nextless"
 run() { NEXTLESS_RELEASE_BASE="file://$rel" NEXTLESS_MODEL_BASE="file://$models" \
-        bash "$script" "$@"; }
+        NEXTLESS_PUNCT_BASE="file://$models" bash "$script" "$@"; }
 
 # --- full install (zipformer leg) -----------------------------------------------
 run --backend=zipformer -y > "$tmp/log1" 2>&1 || fail "install failed: $(cat "$tmp/log1")"
@@ -72,6 +88,16 @@ run --backend=zipformer -y > "$tmp/log1" 2>&1 || fail "install failed: $(cat "$t
 [ -f "$DATA/models/$ZIPDIR/tokens.txt" ] || fail "zipformer model missing"
 # FireRed was not requested: must not exist
 [ ! -e "$DATA/models/$FIRDIR" ] || fail "installed FireRed without being asked"
+# punctuation is opt-in: absent without the flag
+[ ! -e "$DATA/models/$PUNDIR" ] || fail "installed punctuation without --punctuation"
+
+# --- punctuation opt-in leg ------------------------------------------------------
+run --backend=zipformer --punctuation -y > "$tmp/log5" 2>&1 \
+    || fail "--punctuation install failed: $(cat "$tmp/log5")"
+[ -f "$DATA/models/$PUNDIR/model.int8.onnx" ] || fail "punctuation model missing"
+run --backend=zipformer --punctuation -y > "$tmp/log6" 2>&1 \
+    || fail "punctuation re-run failed: $(cat "$tmp/log6")"
+grep -q "Punctuation: already installed" "$tmp/log6" || fail "punctuation re-run did not skip"
 # nothing outside the data home (the parent dirs mkdir -p had to create are
 # fine; no files may live outside DATA)
 if find "$HOME" -type f -not -path "$DATA*" | grep -q .; then

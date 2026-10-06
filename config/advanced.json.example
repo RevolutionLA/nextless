@@ -11,5 +11,11 @@
         "model_dir": "~/.local/share/nextless/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
         "timeout_sec": 120,
         "bin_path": "~/.local/share/nextless/sherpa-onnx/bin/sherpa-onnx-offline"
+    },
+    "punctuation": {
+        "enabled": true,
+        "model_dir": "~/.local/share/nextless/models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8",
+        "bin_path": "~/.local/share/nextless/sherpa-onnx/bin/sherpa-onnx-offline-punctuation",
+        "timeout_sec": 5
     }
 }

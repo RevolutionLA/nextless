@@ -13,6 +13,15 @@ user-visible change rather than one per commit.
 - Issue and PR templates, `CONTRIBUTING.md`, `SECURITY.md`, `.editorconfig`.
 - Badges (CI / release / license / bilingual docs) and cross-links to the contribution docs at
   the top of both READMEs.
+- Local punctuation (issue #4): Zipformer and FireRed results are post-processed through
+  `sherpa-onnx-offline-punctuation` (ct-transformer) on the recognition thread — measured ~0.19 s
+  per 44-character utterance (i7-1260P, int8 model), far below the ASR leg, so it is always-on
+  rather than per-backend-toggled, and killable via `[punctuation].enabled` in `advanced.json`.
+  The decoration can never eat an utterance: missing model, non-zero exit, empty output or a
+  timeout all commit the raw text (covered by `test_punctuator`, including the process-group
+  kill on timeout). Cloud backends and mock are a hard no-op. The ~62 MB model is opt-in via
+  `nextless-get-models --punctuation`; the "no punctuation from local models" limitation is
+  gone from both READMEs and the man page gained a post-processing section.
 - `nextless-get-models` (`tools/get_models.sh`): first-run model helper closing the step where
   new users bail (issue #5). Detects the CPU architecture (x86_64 / aarch64 map to their exact
   v1.13.8 asset names — the aarch64 `-shared-cpu` variant is not derivable from the x64 name),
