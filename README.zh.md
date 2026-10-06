@@ -69,6 +69,10 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
   即可；随包的三个音由 `tools/gen_sounds.py` 生成。
 - **顺序可靠。** 上一句还在识别时就能开始下一句。每次结果绑定“开始录音那一刻”的窗口与输入上下文，
   并按录音顺序上屏（最多 3 个在途）。
+- **听错的词可以自己修。** `~/.config/nextless/hotwords.json` 是一张错词纠正表：`{"LIBR": "礼拜二"}`
+  把“模型听成的”改回“你本来说的”。**所有后端**（本地和云端）的最终文本上屏前都先过这张表，再过标点：
+  同位置最长键优先、替换不连环（A→B、B→C 不会把 A 变成 C）、文件缺失/为空/格式坏就什么都不改。
+  改完表下一句立即生效，不用重启 fcitx5。
 - **报错不进正文。** 网络、服务、超时、麦克风故障都只显示在光标旁的输入法状态面板里。没说话就是
   no-op：什么都不上屏，也不报错。
 
@@ -77,7 +81,9 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 - **本地标点是一个单独的可选模型。** 装上 ct-transformer 标点模型（`nextless-get-models
   --punctuation`，约 62 MB）后，Zipformer 和 FireRed 的结果会自动带上 ，。？——i7-1260P
   实测 44 字约 0.19 s，跑在识别线程上，不碰按键路径。模型缺失或处理失败就原样提交裸文本，
-  装饰步骤不会吃掉一句话。豆包后端除了标点还有数字规整和热词。
+  装饰步骤不会吃掉一句话。豆包后端除了标点还有数字规整和它自己的服务端热词。
+- **错词纠正表是逐字节匹配。** `hotwords.json` 是纯文本替换，不分词、不忽略大小写：
+  `LIBR` 修得了，`libr` 就得另配一条；同一个词的几种听错写法要各写一行。
 - **中英混说**在 Zipformer bilingual 上能用，方言和专有名词偏弱；FireRed 明显更准但更慢。
 - **模型不随仓库分发**，需要自己下载（约 360 MB 或 1.2 GB，见下）。
 - **还没有 `.deb`**，`fcitx5-nextless-git` 也还没进 AUR —— `PKGBUILD` 已提供，打包进度见
@@ -235,9 +241,12 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 |---|---|---|---|---|
 | `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | i7-1260P 8 线程 RTF ≈ 0.13，约 1 GB RSS；装标点模型后自动带标点 |
 | `fire_red` | 本地 | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | 12 线程 RTF ≈ 0.38，峰值 RSS ~1.7 GB，方言和长句明显更好 |
-| `doubao` | 云端 | — | 豆包流式识别 2.0 | 有标点、数字规整、热词，需要 API key |
+| `doubao` | 云端 | — | 豆包流式识别 2.0 | 有标点、数字规整、服务端热词，需要 API key |
 | `qwen` | 云端 | — | Qwen3-ASR-Flash | 需要 API key |
 | `mock` | 测试 | — | — | 固定返回 `hello world`，用来验证按键和采集链路 |
+
+`hotwords.json` 纠正表对**所有**后端生效——它改写的是最终文本，与是谁识别的无关。还没接的是
+模型内部的偏置（sherpa-onnx 的 `--hotword` 解码钩子）；专名、同音词这类需求目前由纠正表覆盖。
 
 两个本地后端刻意“每句起一个 `sherpa-onnx` 进程”：没有常驻模型服务、没有孤儿进程、没有需要维护的
 预热状态。（仓库里的 `systemd/` 单元是实验性的常驻服务路线，**不是**必需的。）
@@ -251,6 +260,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 | `~/.config/nextless/audio.json` | `denoise`：`none` \| `speexdsp` \| `deepfilter` |
 | `NEXTLESS_DEEP_FILTER`（环境变量） | 指向系统里的 `deep-filter`，优先于默认安装路径 |
 | `~/.config/nextless/advanced.json` | 模型路径、`num_threads`、超时、LUFS 目标、VAD 阈值 |
+| `~/.config/nextless/hotwords.json` | 错词纠正表 `{"听错的": "本意"}`，所有后端上屏前都会过它 |
 | `~/.config/nextless/doubao.json` / `qwen.json` | 云端凭据 |
 | `~/.config/nextless/pa_buffer.json` | 自动探测的 PulseAudio buffer（自生成） |
 | `~/.local/share/nextless/sounds/` | 覆盖随包的 `activate` / `deactivate` / `switch` 提示音（可选） |
@@ -259,14 +269,15 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 `sysconfdir`/nextless——发行版构建是 `/etc/nextless`（PKGBUILD 显式传 `--sysconfdir=/etc`，
 `prefix=/usr` 时 meson 本身也会解析到那里），普通源码安装是 `/usr/local/etc/nextless`。
 运行时读取的就是同一个目录（编译期注入）：用户文件优先，缺失时首次读取会从打包目录拷一份，
-不会覆盖已有文件。
+不会覆盖已有文件。`hotwords.json` 随包的是占位符模板（`YOUR_` 开头的键会在解析时被丢弃），
+拷到 `~/.config` 后不改写任何真实语音——想生效就自己把条目填进去。
 
 ## 开发
 
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 15 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、get_models 契约
+meson test -C build            # 17 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
@@ -313,7 +324,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 | | 事项 | 完成标准 |
 |---|---|---|
 | 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。**已修复，[#10](https://github.com/RevolutionLA/nextless/pull/10)**——四个 provider 现在都在回调触发前删掉临时 WAV（CI debug 任务间歇性捕获；本地用 `taskset -c 0` 复现概率约 5%）。 | ✅ 两种构建都绿；修复比这条完成标准更严——「先回调、后清理」已不合法，断言保持严格而非放宽 |
-| 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。**已修复，[#11](https://github.com/RevolutionLA/nextless/pull/11)**——meson 现在把示例以 `*.json` 装进构建时的 `sysconfdir`/nextless，并把同一路径编译进 loader，安装与读取不可能再漂移；CI 会做 staged install，五个文件少装一个就红。 | ✅ meson 确实会装——发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`），普通源码安装是 `/usr/local/etc/nextless`，与 loader 读取的路径同源 |
+| 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。**已修复，[#11](https://github.com/RevolutionLA/nextless/pull/11)**——meson 现在把示例以 `*.json` 装进构建时的 `sysconfdir`/nextless，并把同一路径编译进 loader，安装与读取不可能再漂移；CI 会做 staged install，随包示例（自 `hotwords.json` 起共六份）少装一个就红。 | ✅ meson 确实会装——发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`），普通源码安装是 `/usr/local/etc/nextless`，与 loader 读取的路径同源 |
 | 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。**已修复，[#12](https://github.com/RevolutionLA/nextless/pull/12)**——provider 在 spawn 前预检运行时与每个模型文件，报出具体路径；面板显示「sherpa-onnx runtime missing / offline model missing」并指向 README（`test_missing_components` 用假 `$HOME` 覆盖全部四条失败路径）。 | ✅ 面板说清缺哪一块、并指到 README 的下载小节；实际找过的路径进 fcitx5 日志（也是下面向导的前置） |
 | 4 | **真正的安装与卸载路径**：先 `.deb`（依赖、模型获取、干净卸载），再 AUR。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |
 | 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。 | 用真实二进制跑一句 10 秒音频，记录墙钟与 RTF——否则就把它下架 |
@@ -322,7 +333,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 方向清单：
 
 - [x] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
-- [ ] 本地后端的热词 / 自定义词组
+- [x] 热词 / 自定义词组：`~/.config/nextless/hotwords.json` 错词纠正表（所有后端）；模型内部偏置仍未接
 - [x] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）—— `nextless-get-models`
 - [ ] `.deb` 打包（以及 AUR 上的 `fcitx5-nextless`）
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS

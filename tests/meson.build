@@ -59,6 +59,10 @@ test_punctuator = executable('test_punctuator',
   'test_punctuator.cpp',
   dependencies: [asr_provider_dep])
 
+test_hotwords = executable('test_hotwords',
+  'test_hotwords.cpp',
+  dependencies: [asr_provider_dep])
+
 test('asr_registry', test_asr_registry)
 test('audio_capture_file', test_audio_capture_file)
 test('buffer_detect_cache', test_buffer_detect_cache)
@@ -74,6 +78,7 @@ test('missing_components', test_missing_components)
 test('audio_config_loader', test_audio_config_loader)
 test('capture_dir_sweep', test_capture_dir_sweep, timeout: 30)
 test('punctuator', test_punctuator, timeout: 30)
+test('hotwords', test_hotwords, timeout: 30)
 
 # Issue #5: get_models.sh contract test — arch/asset-name mapping, install
 # layout, idempotency, and "no half-extracted model on failure" (runs

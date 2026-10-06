@@ -42,6 +42,7 @@
 #include "qwen_provider.h"        // 确保千问后端被链接并自动注册
 #include "audio_capture.h"
 #include "punctuator.h"          // 本地后端结果的标点后处理 (issue #4)
+#include "hotwords.h"            // 全后端的错词替换表 (issue #6)
 #include "diagnostic_log.h"
 #include "output_handler.h"
 #include "nextless_config.h"
@@ -800,10 +801,15 @@ private:
                 {"text_length", std::to_string(text.size())},
                 {"text_hash", diagnosticHash(text)}
             });
+            // 错词替换表(issue #6): 所有后端都过一遍, 包括云后端 —— 这是
+            // 用户自己的词典, 不是模型能力差异。跑在识别线程、withOwner
+            // 之外(理由同标点)。表按内容缓存, 每句最多多一次小文件读。
+            // 顺序: 先替换再标点, 免得标点后插进来的 ，。 把键切开。
+            std::string finalText = text;
+            if (!finalText.empty()) nextless::applyHotwordReplacements(finalText);
             // 本地后端补标点(issue #4): 跑在 provider 的识别线程上, 且必须
             // 在 withOwner 之外 —— gate 的 mutex 在回调期间是持着的, 按键
             // 路径不能等一个 ~0.2s 的子进程。缺模型/失败时原样提交。
-            std::string finalText = text;
             if (isFinal) nextless::punctuateLocalText(finalText, punctProviderId);
             withOwner(callbackGate, [&](NextlessAddon &owner) {
                 owner.outputHandler_->submit(target, finalText, [callbackGate, target] {

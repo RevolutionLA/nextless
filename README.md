@@ -82,6 +82,11 @@ clipboard round-trip, no focus stealing.
 - **Ordering you can trust.** You can start the next dictation while the previous one is still
   being recognised. Each result is bound to the window and input context that was focused when
   that recording started, and commits happen in recording order (up to three in flight).
+- **Your mishearings are fixable.** `~/.config/nextless/hotwords.json` maps what the model heard
+  to what you meant (`{"LIBR": "礼拜二"}`). The table post-processes the final text of **every**
+  backend, local and cloud, before punctuation: longest match wins, replacements never chain,
+  and a missing, empty or malformed file changes nothing. Editing it takes effect on the next
+  utterance — no restart.
 - **Errors stay out of your document.** Network, service, timeout and microphone failures appear
   as input-panel status text, never as inserted characters. Silence is a no-op: hold the key, say
   nothing, release — nothing is committed and nothing is reported.
@@ -94,7 +99,12 @@ clipboard round-trip, no focus stealing.
   44-character utterance on an i7-1260P, on the recognition thread, never the
   keypress path. If the model is missing or the punctuation run fails, the raw
   text is committed instead: the decoration step can never eat an utterance.
-  Doubao still has richer punctuation plus ITN and hotwords.
+  Doubao still has richer punctuation plus ITN and its own server-side hotwords
+  (different from the local `hotwords.json` correction table, which every
+  backend goes through).
+- **The correction table is literal.** `hotwords.json` does byte-exact
+  replacement — no word segmentation, case-sensitive, no inflection awareness.
+  Two ways of mishearing one word means two entries.
 - **Chinese/English mixed speech** is workable on Zipformer bilingual but imperfect on dialect
   and proper nouns; FireRed is noticeably better and slower.
 - **Local models are not shipped.** You download them yourself (~360 MB or ~1.2 GB, see below).
@@ -266,9 +276,14 @@ asynchronously.
 |---|---|---|---|---|
 | `zipformer` | local | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | RTF ≈ 0.13 on an i7-1260P @ 8 threads, ~1 GB RSS; punctuation with the opt-in ct-transformer model |
 | `fire_red` | local | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | RTF ≈ 0.38 @ 12 threads, peak ~1.7 GB RSS, clearly better on dialects and long sentences |
-| `doubao` | cloud | — | Doubao Streaming ASR 2.0 | punctuation, ITN and hotwords; needs an API key |
+| `doubao` | cloud | — | Doubao Streaming ASR 2.0 | punctuation, ITN and server-side hotwords; needs an API key |
 | `qwen` | cloud | — | Qwen3-ASR-Flash | needs an API key |
 | `mock` | test | — | — | returns `hello world`; useful for verifying the key/capture path |
+
+The `hotwords.json` correction table applies to **all** of them — it rewrites the final text
+after whichever backend produced it. What is *not* wired is per-model biasing (sherpa-onnx's
+`--hotword` decode hook on Zipformer); the correction table currently covers proper nouns and
+homophones instead.
 
 Both local backends spawn one `sherpa-onnx` process per utterance on purpose: no resident model
 server, no orphan process, no warm-up state to leak. (The `systemd/` units in this repo are an
@@ -283,6 +298,7 @@ experimental resident-server path and are **not** required.)
 | `~/.config/nextless/audio.json` | `denoise`: `none` \| `speexdsp` \| `deepfilter` |
 | `NEXTLESS_DEEP_FILTER` (env) | path to a system `deep-filter` binary, overrides the bundled location |
 | `~/.config/nextless/advanced.json` | model dirs, `num_threads`, timeouts, LUFS target, VAD thresholds |
+| `~/.config/nextless/hotwords.json` | mishearing correction table `{"what it heard": "what you meant"}`, applied to every backend's final text |
 | `~/.config/nextless/doubao.json` / `qwen.json` | API credentials |
 | `~/.local/share/nextless/sounds/` | optional replacements for the bundled `activate` / `deactivate` / `switch` sounds |
 
@@ -290,14 +306,16 @@ experimental resident-server path and are **not** required.)
 `sysconfdir/nextless` — `/etc/nextless` for distro builds (the PKGBUILD passes `--sysconfdir=/etc`,
 and `prefix=/usr` alone already resolves there), `/usr/local/etc/nextless` for a plain source
 install. The runtime reads that same directory, compiled in: user files win, and a missing user
-file is copied from the packaged directory on first read.
+file is copied from the packaged directory on first read. The packaged `hotwords.json` is a
+placeholder template — keys starting with `YOUR_` are dropped when it is parsed, so the copy can
+never rewrite real speech until you add entries yourself.
 
 ## Development
 
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 15 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, temp-dir cleanup, get_models contract
+meson test -C build            # 17 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner
@@ -346,7 +364,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 | | Item | Done when |
 |---|---|---|
 | 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. **Fixed in [#10](https://github.com/RevolutionLA/nextless/pull/10)** — all four providers now delete the WAV *before* the callback (caught intermittently by CI's debug job; local reproduction under `taskset -c 0` is probabilistic, ~5% on the old code). | ✅ CI is green in both build types; the fix is stronger than this finish line — callback-then-cleanup is now illegal, so the assertion stays strict instead of tolerating it |
-| 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. **Fixed in [#11](https://github.com/RevolutionLA/nextless/pull/11)** — meson installs the examples as `*.json` into the build's `sysconfdir`/nextless and compiles the same path into the loader, so install and read cannot drift; CI does a staged install and fails if any of the five files stops landing. | ✅ meson ships them — `/etc/nextless` for distro builds (`--sysconfdir=/etc`), `/usr/local/etc/nextless` for a plain source install, the same path the loader reads |
+| 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. **Fixed in [#11](https://github.com/RevolutionLA/nextless/pull/11)** — meson installs the examples as `*.json` into the build's `sysconfdir`/nextless and compiles the same path into the loader, so install and read cannot drift; CI does a staged install and fails if any packaged example stops landing (six since `hotwords.json`). | ✅ meson ships them — `/etc/nextless` for distro builds (`--sysconfdir=/etc`), `/usr/local/etc/nextless` for a plain source install, the same path the loader reads |
 | 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. **Fixed in [#12](https://github.com/RevolutionLA/nextless/pull/12)** — providers pre-check the runtime and each model file and report the exact path; the panel shows "sherpa-onnx runtime missing" / "offline model missing" with the README pointer (`test_missing_components` drives all four paths against a fake `$HOME`). | ✅ the input panel names the piece and points at the README's download section; the exact path it looked for goes to the fcitx5 log (and feeds the wizard below) |
 | 4 | **Real install and removal path**: `.deb` first (dependency list, model fetch, clean uninstall), AUR after. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
 | 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. | one 10 s utterance with the real binary, wall-clock and RTF recorded — or the option is retired |
@@ -355,7 +373,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 The longer-term list:
 
 - [x] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
-- [ ] Hotwords / custom phrases for the local backends
+- [x] Hotwords / custom phrases: `~/.config/nextless/hotwords.json` correction table for every backend (per-model biasing still open)
 - [x] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64) — `nextless-get-models`
 - [ ] `.deb` packaging (and `fcitx5-nextless` in the AUR)
 - [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
