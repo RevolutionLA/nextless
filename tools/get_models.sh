@@ -29,6 +29,10 @@ MODEL_BASE="${NEXTLESS_MODEL_BASE:-https://github.com/k2-fsa/sherpa-onnx/release
 # Directory names the providers look for (see advanced.json.example).
 ZIPFORMER_DIR="sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
 FIRERED_DIR="sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26"
+# Local punctuation model (issue #4 post-processing; the punctuator's default
+# model_dir must match this name). Opt-in: ~62 MB, adds ~0.2 s per utterance.
+PUNCT_BASE="${NEXTLESS_PUNCT_BASE:-https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models}"
+PUNCT_DIR="sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8"
 
 DATA_HOME="${NEXTLESS_DATA_HOME:-$HOME/.local/share/nextless}"
 RUNTIME_DIR="$DATA_HOME/sherpa-onnx"
@@ -50,6 +54,11 @@ Options:
                                      asset-name mapping without ARM hardware)
   --dry-run                          print exactly what would happen; no
                                      network, no writes
+  --punctuation                      also install the local punctuation
+                                     model (opt-in, ~62 MB; on a terminal
+                                     the script asks, elsewhere this flag
+                                     is the only way to get it)
+  --no-punctuation                   never install it, even interactively
   --force                            reinstall pieces that are already present
   -y, --yes                          skip the confirmation prompt
   -h, --help                         this help
@@ -61,6 +70,8 @@ arch_override=""
 dry_run=false
 force=false
 assume_yes=false
+want_punct=false
+punct_specified=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -69,6 +80,8 @@ for arg in "$@"; do
         --dry-run)   dry_run=true ;;
         --force)     force=true ;;
         -y|--yes)    assume_yes=true ;;
+        --punctuation)    want_punct=true;  punct_specified=true ;;
+        --no-punctuation) want_punct=false; punct_specified=true ;;
         -h|--help)   usage; exit 0 ;;
         *) echo "get_models: unknown option '$arg' (see --help)" >&2; exit 2 ;;
     esac
@@ -103,6 +116,7 @@ esac
 RUNTIME_URL="$RELEASE_BASE/$RUNTIME_ASSET"
 zipformer_url="$MODEL_BASE/$ZIPFORMER_DIR.tar.bz2"
 firered_url="$MODEL_BASE/$FIRERED_DIR.tar.bz2"
+punct_url="$PUNCT_BASE/$PUNCT_DIR.tar.bz2"
 
 runtime_present() {
     [ -x "$RUNTIME_DIR/bin/sherpa-onnx" ] &&
@@ -164,6 +178,16 @@ if [ -z "$backend" ] && [ -t 0 ] && ! $dry_run; then
     esac
 fi
 
+# Punctuation is an opt-in add-on: ask on a terminal (clear size notice,
+# issue #4), elsewhere only --punctuation enables it. Needs the runtime,
+# which is being installed anyway whenever anything else is fetched.
+if ! $punct_specified && [ -t 0 ] && ! $dry_run; then
+    if $want_zipformer || $want_firered; then
+        read -r -p "Also install the local punctuation model (~62 MB, adds ~0.2s per utterance)? [Y/n] " reply
+        case "$reply" in [nN]*) want_punct=false ;; *) want_punct=true ;; esac
+    fi
+fi
+
 # What actually needs fetching, decided once and reused by plan + actions.
 do_runtime=false
 if ! runtime_present || $force; then do_runtime=true; fi
@@ -177,6 +201,11 @@ if $want_firered && { ! model_present "$FIRERED_DIR" encoder.int8.onnx decoder.i
         tokens.txt || $force; }; then
     do_firered=true
 fi
+do_punct=false
+if $want_punct && { ! model_present "$PUNCT_DIR" model.int8.onnx tokens.json \
+        config.yaml || $force; }; then
+    do_punct=true
+fi
 
 # ---- plan ------------------------------------------------------------------
 echo "Nextless model helper — arch: $arch"
@@ -187,6 +216,9 @@ if $want_zipformer; then
 fi
 if $want_firered; then
     echo "  FireRed   : $firered_url  [$( $do_firered && echo install || echo skip )]"
+fi
+if $want_punct; then
+    echo "  Punct     : $punct_url  [$( $do_punct && echo install || echo skip )]"
 fi
 
 if $dry_run; then
@@ -199,6 +231,7 @@ total_note=""
 if $do_runtime; then total_note+="runtime $(size_of "$RUNTIME_URL")"; fi
 if $do_zipformer; then total_note+="${total_note:+, }Zipformer $(size_of "$zipformer_url")"; fi
 if $do_firered; then total_note+="${total_note:+, }FireRed $(size_of "$firered_url")"; fi
+if $do_punct; then total_note+="${total_note:+, }punctuation $(size_of "$punct_url")"; fi
 
 if [ -n "$total_note" ]; then
     echo "  to download: $total_note"
@@ -288,6 +321,10 @@ fi
 if $want_firered; then
     install_model "$firered_url" "$FIRERED_DIR" "FireRed" \
         encoder.int8.onnx decoder.int8.onnx tokens.txt
+fi
+if $want_punct; then
+    install_model "$punct_url" "$PUNCT_DIR" "Punctuation" \
+        model.int8.onnx tokens.json config.yaml
 fi
 
 echo

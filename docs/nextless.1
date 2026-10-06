@@ -136,6 +136,14 @@ Cloud API. Requires \fBdoubao.json\fP with API key and resource ID.
 .TP
 \fBQwen\fP (Alibaba DashScope)
 Cloud API. Requires \fBqwen.json\fP with API key.
+.TP
+\fBPunctuation\fP (optional post-processing)
+Local backend results can be run through \fBsherpa-onnx-offline-punctuation\fP
+(ct-transformer) to add ，。？. The ~62 MB model is opt-in
+(\fBnextless-get-models --punctuation\fP) and applied on the recognition
+thread (~0.2 s per utterance). If the model is missing or the run fails,
+the raw text is committed; cloud backends are never touched.
+Disable with the \fBpunctuation.enabled\fP key in \fBadvanced.json\fP.
 .SH AUDIO PIPELINE
 Recorded audio goes through:
 .RS

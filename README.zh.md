@@ -74,8 +74,10 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 
 ## 已知限制（装之前先看）
 
-- **本地模型不出标点。** Zipformer 和 FireRed 只给裸文本。要标点暂时只能用豆包后端，
-  或者等 [Roadmap](#后续计划) 里的 ct-transformer 方案。
+- **本地标点是一个单独的可选模型。** 装上 ct-transformer 标点模型（`nextless-get-models
+  --punctuation`，约 62 MB）后，Zipformer 和 FireRed 的结果会自动带上 ，。？——i7-1260P
+  实测 44 字约 0.19 s，跑在识别线程上，不碰按键路径。模型缺失或处理失败就原样提交裸文本，
+  装饰步骤不会吃掉一句话。豆包后端除了标点还有数字规整和热词。
 - **中英混说**在 Zipformer bilingual 上能用，方言和专有名词偏弱；FireRed 明显更准但更慢。
 - **模型不随仓库分发**，需要自己下载（约 360 MB 或 1.2 GB，见下）。
 - **还没有 `.deb`**，`fcitx5-nextless-git` 也还没进 AUR —— `PKGBUILD` 已提供，打包进度见
@@ -151,7 +153,9 @@ nextless-get-models
 `tools/get_models.sh`）会检测 CPU 架构、下载前先把体积报给你、并让你在三选一里挑
 Zipformer / FireRed / 都要（非交互用 `--backend=...`）。它只写 `~/.local/share/nextless/`
 这一个目录；重复运行会跳过已装好的部分；解压出来的目录名和 `advanced.json` 期望的
-一致才会落位，所以下载失败不会留下半个模型。`--dry-run` 只打印计划，不动任何东西。
+一致才会落位，所以下载失败不会留下半个模型。`--dry-run` 只打印计划，不动任何东西；
+`--punctuation` 会额外下载可选的标点模型（约 62 MB），装上后本地后端自动补 ，。？
+——交互式运行会直接问你要不要装。
 
 想自己动手的话，手工路径：
 
@@ -229,7 +233,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 
 | Provider | 类型 | 体积 | 模型 | 实测 |
 |---|---|---|---|---|
-| `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | i7-1260P 8 线程 RTF ≈ 0.13，约 1 GB RSS，无标点 |
+| `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | i7-1260P 8 线程 RTF ≈ 0.13，约 1 GB RSS；装标点模型后自动带标点 |
 | `fire_red` | 本地 | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | 12 线程 RTF ≈ 0.38，峰值 RSS ~1.7 GB，方言和长句明显更好 |
 | `doubao` | 云端 | — | 豆包流式识别 2.0 | 有标点、数字规整、热词，需要 API key |
 | `qwen` | 云端 | — | Qwen3-ASR-Flash | 需要 API key |
@@ -317,9 +321,9 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 
 方向清单：
 
-- [ ] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
+- [x] 本地标点：接 `sherpa-onnx-offline-punctuation`（ct-transformer）
 - [ ] 本地后端的热词 / 自定义词组
-- [ ] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）
+- [x] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）—— `nextless-get-models`
 - [ ] `.deb` 打包（以及 AUR 上的 `fcitx5-nextless`）
 - [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
 - [ ] 声音克隆 / 个人纠错学习 —— 还没定，先去看讨论区

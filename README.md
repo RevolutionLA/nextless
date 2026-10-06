@@ -88,9 +88,13 @@ clipboard round-trip, no focus stealing.
 
 ## Limitations (read before you install)
 
-- **No punctuation from the local models.** Zipformer and FireRed return bare text. Use the
-  Doubao backend for automatic punctuation, or wait for the ct-transformer integration in
-  [Roadmap](#roadmap).
+- **Local punctuation is a separate, opt-in model.** With the ct-transformer
+  model installed (`nextless-get-models --punctuation`, ~62 MB), Zipformer and
+  FireRed results come out with ，。？ automatically — measured ≈ 0.19 s per
+  44-character utterance on an i7-1260P, on the recognition thread, never the
+  keypress path. If the model is missing or the punctuation run fails, the raw
+  text is committed instead: the decoration step can never eat an utterance.
+  Doubao still has richer punctuation plus ITN and hotwords.
 - **Chinese/English mixed speech** is workable on Zipformer bilingual but imperfect on dialect
   and proper nouns; FireRed is noticeably better and slower.
 - **Local models are not shipped.** You download them yourself (~360 MB or ~1.2 GB, see below).
@@ -174,7 +178,8 @@ the download size before fetching anything, and lets you pick Zipformer, FireRed
 is safe to re-run — already-installed pieces are skipped — and only moves an archive into
 place after verifying the extracted directory names are the ones `advanced.json` expects,
 so a failed download leaves no half-extracted model behind. `--dry-run` prints the plan
-without touching anything.
+without touching anything, and `--punctuation` also fetches the optional ~62 MB ct-transformer
+model that gives the local backends ，。？ (an interactive run asks; see [Limitations](#limitations-read-before-you-install)).
 
 Manual path, if you would rather do it yourself:
 
@@ -259,7 +264,7 @@ asynchronously.
 
 | Provider | Type | Disk | Model | Notes |
 |---|---|---|---|---|
-| `zipformer` | local | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | RTF ≈ 0.13 on an i7-1260P @ 8 threads, ~1 GB RSS, no punctuation |
+| `zipformer` | local | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | RTF ≈ 0.13 on an i7-1260P @ 8 threads, ~1 GB RSS; punctuation with the opt-in ct-transformer model |
 | `fire_red` | local | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | RTF ≈ 0.38 @ 12 threads, peak ~1.7 GB RSS, clearly better on dialects and long sentences |
 | `doubao` | cloud | — | Doubao Streaming ASR 2.0 | punctuation, ITN and hotwords; needs an API key |
 | `qwen` | cloud | — | Qwen3-ASR-Flash | needs an API key |
@@ -349,9 +354,9 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 
 The longer-term list:
 
-- [ ] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
+- [x] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
 - [ ] Hotwords / custom phrases for the local backends
-- [ ] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64)
+- [x] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64) — `nextless-get-models`
 - [ ] `.deb` packaging (and `fcitx5-nextless` in the AUR)
 - [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
 - [ ] Voice cloning / per-user correction learning — undecided, see the discussion thread first

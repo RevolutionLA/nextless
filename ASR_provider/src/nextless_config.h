@@ -114,6 +114,20 @@ inline int jsonInt(const std::string &json, const std::string &key, int def = 0)
     return (int)val;
 }
 
+// JSON 布尔字面量 (true/false)，也接受 0/1 —— 手写配置里两种都有人用。
+inline bool jsonBool(const std::string &json, const std::string &key, bool def) {
+    auto pos = json.find("\"" + key + "\"");
+    if (pos == std::string::npos) return def;
+    pos = json.find(':', pos) + 1;
+    pos = json.find_first_not_of(" \t\n", pos);
+    if (pos == std::string::npos) return def;
+    if (json.compare(pos, 4, "true") == 0) return true;
+    if (json.compare(pos, 5, "false") == 0) return false;
+    if (json[pos] == '1') return true;
+    if (json[pos] == '0') return false;
+    return def;
+}
+
 inline double jsonDouble(const std::string &json, const std::string &key, double def = 0.0) {
     auto pos = json.find("\"" + key + "\"");
     if (pos == std::string::npos) return def;
