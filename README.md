@@ -108,10 +108,10 @@ clipboard round-trip, no focus stealing.
 - **Chinese/English mixed speech** is workable on Zipformer bilingual but imperfect on dialect
   and proper nouns; FireRed is noticeably better and slower.
 - **Local models are not shipped.** You download them yourself (~360 MB or ~1.2 GB, see below).
-- **The `.deb` is a build-it package for now**: `debian/` is in the repo and CI builds + installs
-  + removes it on every PR, but there is no apt repository to pull it from yet, and
-  `fcitx5-nextless-git` is not submitted to the AUR yet (the `PKGBUILD` ships with the repo).
-  Packaging tracking: [Roadmap](#roadmap) / issue #7.
+- **The `.deb` is published on the GitHub Releases page** (with sha256sums, and
+  `tools/install-deb.sh` wraps the one-command install); CI builds + installs + removes
+  it on every PR. There is still no apt repository, and `fcitx5-nextless-git` is not in
+  the AUR yet (issue #35). amd64 is the only prebuilt arch.
 
 ## Requirements
 
@@ -126,7 +126,16 @@ clipboard round-trip, no focus stealing.
 
 **Arch** — build the provided `PKGBUILD`: `makepkg -si` (produces `fcitx5-nextless-git`).
 
-**Debian / Ubuntu** — build the `.deb` from the shipped `debian/` packaging and install it:
+**Debian / Ubuntu** — one command; it downloads the `.deb` from the latest GitHub
+Release, verifies the sha256, and lets apt resolve every dependency (fcitx5 included):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash
+```
+
+The script ends by printing the two steps it will not do for you: `nextless-get-models
+--zipformer --punctuation` (models are deliberately not in the .deb) and `fcitx5 -r -d`.
+amd64 only; other architectures build the package themselves:
 
 ```bash
 sudo apt install -y dpkg-dev debhelper meson ninja-build git \
@@ -135,14 +144,8 @@ sudo apt install -y dpkg-dev debhelper meson ninja-build git \
 git clone https://github.com/RevolutionLA/nextless.git
 cd nextless
 dpkg-buildpackage -us -uc -b
-sudo dpkg -i ../fcitx5-nextless_*_amd64.deb    # or: sudo apt install ../fcitx5-nextless_*.deb
-fcitx5 -r -d
+sudo apt install ../fcitx5-nextless_*.deb && fcitx5 -r -d
 ```
-
-CI builds this package, installs it on a clean runner and removes it again on every PR,
-so `dpkg-buildpackage` is not a second-class path. Model files are deliberately *not* in
-the payload (~1.6 GB) — step 4 below fetches what you need. There is no apt repository to
-pull from yet; if you just want to run the current main, route 1 below is one command.
 
 ### 1. Build
 

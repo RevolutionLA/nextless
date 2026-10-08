@@ -86,9 +86,9 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
   `LIBR` 修得了，`libr` 就得另配一条；同一个词的几种听错写法要各写一行。
 - **中英混说**在 Zipformer bilingual 上能用，方言和专有名词偏弱；FireRed 明显更准但更慢。
 - **模型不随仓库分发**，需要自己下载（约 360 MB 或 1.2 GB，见下）。
-- **`.deb` 目前是"自己构建"级**：`debian/` 已随仓库发布，CI 每个 PR 都会打包、装进干净
-  runner、再卸载验证，但还没有 apt 源可以直接拉；`fcitx5-nextless-git` 也还没提交到 AUR
-  （`PKGBUILD` 已随仓库提供）。跟踪见 [Roadmap](#后续计划) / issue #7。
+- **`.deb` 已发布在 GitHub Releases 页**（附 sha256sums，`tools/install-deb.sh` 提供一条命令
+  安装）；CI 每个 PR 都会构建、装进干净 runner、再卸载验证。apt 源仍未上线，
+  `fcitx5-nextless-git` 也还没提交到 AUR（#35）；预编译目前只有 amd64。
 
 ## 环境要求
 
@@ -102,7 +102,15 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 
 **Arch**：仓库里的 `PKGBUILD` 直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
 
-**Debian / Ubuntu**：用随仓库的 `debian/` 打包，装本机：
+**Debian / Ubuntu**：一条命令，从 GitHub Release 拉最新 `.deb`，校验 sha256，依赖（含
+fcitx5）全部交给发行版自己的 apt 解析：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash
+```
+
+脚本最后会打印它不会替你做的那两步：`nextless-get-models --zipformer --punctuation`
+（模型刻意不进包）和 `fcitx5 -r -d`。目前只提供 amd64；其他架构自行构建：
 
 ```bash
 sudo apt install -y dpkg-dev debhelper meson ninja-build git \
@@ -111,13 +119,13 @@ sudo apt install -y dpkg-dev debhelper meson ninja-build git \
 git clone https://github.com/RevolutionLA/nextless.git
 cd nextless
 dpkg-buildpackage -us -uc -b
-sudo dpkg -i ../fcitx5-nextless_*_amd64.deb    # 或 sudo apt install ../fcitx5-nextless_*.deb
-fcitx5 -r -d
+sudo apt install ../fcitx5-nextless_*.deb && fcitx5 -r -d
 ```
 
 CI 每个 PR 都会构建这个包、装进干净的 runner、再卸载检查不留残余，所以打包不是二等路径。
-模型文件刻意**不在**包里（约 1.6 GB）——下面的第 4 步按需下载。apt 源还没有；想直接跑
-当前 main 的话，下面第 1 步是一条命令。
+模型文件刻意**不在**包里（约 1.6 GB）——下面的第 4 步按需下载。包发布在
+[GitHub Releases](https://github.com/RevolutionLA/nextless/releases)（附 sha256sums）；
+apt 源与 AUR 还没上线（#35）。
 
 ### 1. 构建
 
