@@ -109,12 +109,13 @@ jobs:
           tar -C . --exclude=.git --exclude=build --exclude=obj-\* \
               --exclude=stage-\* --exclude=debian/.debhelper \
               -cf - . | tar -C /tmp/pkgsrc -xf -
-          dpkg-buildpackage -us -uc -b --build=binary -d -jauto
-          dpkg-deb -I fcitx5-nextless_*.deb | grep -E "^ (Package|Depends)"
+          cd /tmp/pkgsrc
+          dpkg-buildpackage -us -uc -b -d -jauto
+          dpkg-deb -I /tmp/fcitx5-nextless_*_amd64.deb | grep -E "^ (Package|Depends)"
 
       - name: Install the built .deb into this clean runner
         run: |
-          sudo dpkg -i ./fcitx5-nextless_*_amd64.deb || sudo apt-get install -fy
+          sudo dpkg -i /tmp/fcitx5-nextless_*_amd64.deb || sudo apt-get install -fy
           test -f /usr/share/fcitx5/addon/nextless.conf
           test -f /usr/lib/*/fcitx5/nextless.so
           test -x /usr/bin/nextless-get-models
