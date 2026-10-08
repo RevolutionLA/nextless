@@ -24,6 +24,7 @@ backup=(
     'etc/nextless/doubao.json'
     'etc/nextless/qwen.json'
     'etc/nextless/nextless.json'
+    'etc/nextless/hotwords.json'
 )
 
 pkgver() {

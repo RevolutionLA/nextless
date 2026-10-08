@@ -1,0 +1,7 @@
+fcitx5-nextless (0.2.0-1) unstable; urgency=medium
+
+  * Initial Debian/Ubuntu package. Ships the fcitx5 push-to-talk addon,
+    the `nextless-get-models` helper and the packaged config defaults.
+    ASR models are deliberately NOT in the payload (first-run download).
+
+ -- RevolutionLA <revolutionla@users.noreply.github.com>  Tue, 06 Oct 2026 09:00:00 +0800

@@ -86,8 +86,9 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
   `LIBR` 修得了，`libr` 就得另配一条；同一个词的几种听错写法要各写一行。
 - **中英混说**在 Zipformer bilingual 上能用，方言和专有名词偏弱；FireRed 明显更准但更慢。
 - **模型不随仓库分发**，需要自己下载（约 360 MB 或 1.2 GB，见下）。
-- **还没有 `.deb`**，`fcitx5-nextless-git` 也还没进 AUR —— `PKGBUILD` 已提供，打包进度见
-  [Roadmap](#后续计划)。
+- **`.deb` 目前是"自己构建"级**：`debian/` 已随仓库发布，CI 每个 PR 都会打包、装进干净
+  runner、再卸载验证，但还没有 apt 源可以直接拉；`fcitx5-nextless-git` 也还没提交到 AUR
+  （`PKGBUILD` 已随仓库提供）。跟踪见 [Roadmap](#后续计划) / issue #7。
 
 ## 环境要求
 
@@ -96,6 +97,27 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 - 默认模型覆盖中文、英文与中英混说
 
 ## 安装
+
+### 0. 选一条路
+
+**Arch**：仓库里的 `PKGBUILD` 直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
+
+**Debian / Ubuntu**：用随仓库的 `debian/` 打包，装本机：
+
+```bash
+sudo apt install -y dpkg-dev debhelper meson ninja-build git \
+  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+git clone https://github.com/RevolutionLA/nextless.git
+cd nextless
+dpkg-buildpackage -us -uc -b
+sudo dpkg -i ../fcitx5-nextless_*_amd64.deb    # 或 sudo apt install ../fcitx5-nextless_*.deb
+fcitx5 -r -d
+```
+
+CI 每个 PR 都会构建这个包、装进干净的 runner、再卸载检查不留残余，所以打包不是二等路径。
+模型文件刻意**不在**包里（约 1.6 GB）——下面的第 4 步按需下载。apt 源还没有；想直接跑
+当前 main 的话，下面第 1 步是一条命令。
 
 ### 1. 构建
 
@@ -122,8 +144,6 @@ sudo meson install -C build
 > `-Wpedantic` 是**故意不开**的：fcitx5 自己的 `FCITX_CONFIGURATION` / `FCITX_DECLARE_PRIVATE`
 > 宏展开后会在类作用域多出一个 `;`，各发行版打包的 fcitx5 版本会因此报错（fcitx5 头文件也因此按
 > 系统头引入）。这个坑不该由我们来填。
-
-Arch 用户直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
 
 ### 2. 加载插件
 

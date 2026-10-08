@@ -1,0 +1,38 @@
+Source: fcitx5-nextless
+Section: utils
+Priority: optional
+Maintainer: RevolutionLA <revolutionla@users.noreply.github.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ meson,
+ ninja-build,
+ pkg-config,
+ libfcitx5core-dev,
+ libpulse-dev,
+ libebur128-dev,
+ libcurl4-openssl-dev | libcurl4-gnutls-dev | libcurl-dev,
+ libspeexdsp-dev,
+ libsoxr-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: fcitx5-nextless
+Architecture: linux-any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: Push-to-talk voice input add-on for fcitx5 (offline-first)
+ Nextless turns any Linux desktop into a push-to-talk dictation surface:
+ hold a key (bare modifiers like Right Ctrl included), speak, release, and
+ the text commits through the input-method path you already use in every
+ app - no accessibility grants, no clipboard round-trip, no focus stealing.
+ .
+ Two fully offline ASR backends run locally through sherpa-onnx (Zipformer
+ bilingual zh-en, FireRed ASR2 int8); Doubao and Qwen3-ASR are optional
+ cloud backends. Results get loudness normalisation, denoising, VAD
+ silence trimming, an opt-in local punctuation model and a user-editable
+ mishearing correction table.
+ .
+ ASR models are deliberately NOT shipped in this package (~1.6 GB of
+ downloads): run nextless-get-models after installing to fetch the sherpa
+ runtime and the models you want.

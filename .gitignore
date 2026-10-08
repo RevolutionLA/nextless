@@ -10,6 +10,14 @@ log.txt
 out/
 .cortexkit/
 
+# dpkg-buildpackage leftovers (regenerated on every build, never committed)
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/*.debhelper.log
+debian/*.substvars
+debian/files
+debian/fcitx5-nextless/
+
 # IDE
 .idea/
 .cortexkit/
