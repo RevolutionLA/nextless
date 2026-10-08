@@ -14,7 +14,11 @@ user-visible change rather than one per commit.
   to a GitHub Release. `tools/install-deb.sh` consumes exactly that: verify checksum,
   `apt install` the deb (the package now hard-depends on `fcitx5`, so apt pulls
   everything from the distro archive), then print the two first-run steps it refuses to
-  do silently (model download, `fcitx5 -r -d`). README (en/zh) lead with the one-liner;
+  do silently (model download, `fcitx5 -r -d`). Anonymous `api.github.com` rate limits
+  are normal behind shared NAT, so resolution falls back to the `/releases/latest`
+  redirect + the deterministic asset naming the Release workflow enforces; checksums are
+  compared as digests (the asset lands as `install.deb`, so `sha256sum -c` by filename
+  would not match). README (en/zh) lead with the one-liner;
   building the package yourself stays documented for non-amd64.
 - Reproducible A/B benchmark harness (issue #8): `tools/benchmark/` — `bench_asr`
   drives each backend through the **exact add-on code path** (`AsrProviderRegistry`
