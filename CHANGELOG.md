@@ -8,6 +8,17 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- Reproducible A/B benchmark harness (issue #8): `tools/benchmark/` — `bench_asr`
+  drives each backend through the **exact add-on code path** (`AsrProviderRegistry`
+  + `transcribe(samples, wavPath)`), `cer.py` implements a documented zh/en
+  normaliser (NFKC, letters/digits only, CJK = one token per char; empty references
+  are timed but never scored), and `run_bench.sh` prints one machine-attributable
+  table: first-token latency, warm RTF, cold wall, and peak RSS **including the
+  per-request inference child** via `RUSAGE_CHILDREN` (the harness process alone
+  would report ~20 MB and hide the gigabyte the models actually cost). The repo
+  ships no speech: `record_corpus.sh` builds a self-recorded 16 kHz corpus.
+  `docs/benchmarks.md` carries the first published run (i7-1260P, Apache-2.0 demo
+  wavs, timing-only — CER awaits verified transcripts) together with its raw JSONL.
 - `.deb` packaging for Debian/Ubuntu (issue #7, first half): shipped `debian/` sources —
   debhelper 13 + the meson buildsystem, `Rules-Requires-Root: no`, distro layout
   (`/usr/lib/<multiarch>/fcitx5/nextless.so`, manifest in `/usr/share/fcitx5/addon`,

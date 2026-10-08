@@ -22,3 +22,8 @@ debian/fcitx5-nextless/
 .idea/
 .cortexkit/
 .vscode/
+
+# run_bench.sh default output dir (results get curated into docs/benchmarks/)
+bench-*/
+
+__pycache__/

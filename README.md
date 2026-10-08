@@ -295,8 +295,8 @@ asynchronously.
 
 | Provider | Type | Disk | Model | Notes |
 |---|---|---|---|---|
-| `zipformer` | local | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | RTF ≈ 0.13 on an i7-1260P @ 8 threads, ~1 GB RSS; punctuation with the opt-in ct-transformer model |
-| `fire_red` | local | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | RTF ≈ 0.38 @ 12 threads, peak ~1.7 GB RSS, clearly better on dialects and long sentences |
+| `zipformer` | local | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | harness-measured: warm RTF ≈ 0.37, first result ≈ 2.3 s for ~5 s audio, peak RSS ~0.5 GB (i7-1260P; [docs/benchmarks.md](docs/benchmarks.md)) |
+| `fire_red` | local | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | harness-measured: warm RTF ≈ 0.82, first result ≈ 6.1 s, peak RSS ~1.6 GB, clearly better on dialects and long sentences ([docs/benchmarks.md](docs/benchmarks.md)) |
 | `doubao` | cloud | — | Doubao Streaming ASR 2.0 | punctuation, ITN and server-side hotwords; needs an API key |
 | `qwen` | cloud | — | Qwen3-ASR-Flash | needs an API key |
 | `mock` | test | — | — | returns `hello world`; useful for verifying the key/capture path |
@@ -336,7 +336,7 @@ never rewrite real speech until you add entries yourself.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 17 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract
+meson test -C build            # 18 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner
@@ -397,7 +397,9 @@ The longer-term list:
 - [x] Hotwords / custom phrases: `~/.config/nextless/hotwords.json` correction table for every backend (per-model biasing still open)
 - [x] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64) — `nextless-get-models`
 - [ ] `.deb` packaging (and `fcitx5-nextless` in the AUR)
-- [ ] A/B benchmark harness publishing CER / latency / RTF / RSS per model
+- [x] A/B benchmark harness publishing CER / latency / RTF / RSS per model
+      (`tools/benchmark/` + [docs/benchmarks.md](docs/benchmarks.md); CER rows
+      still need verified transcripts — recording one's own corpus is documented)
 - [ ] Voice cloning / per-user correction learning — undecided, see the discussion thread first
 - [x] CI: build × test matrix on GCC with `-Dwerror=true`, plus a diagnostics build
 - [x] Silence is a no-op — no `ASR error: empty result`, and FireRed's `<sil>` never reaches the document
