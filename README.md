@@ -336,7 +336,7 @@ never rewrite real speech until you add entries yourself.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 17 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract
+meson test -C build            # 18 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner

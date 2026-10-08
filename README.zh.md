@@ -297,7 +297,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 17 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约
+meson test -C build            # 18 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约、CER/WER 归一化
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
