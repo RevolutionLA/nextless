@@ -108,8 +108,10 @@ clipboard round-trip, no focus stealing.
 - **Chinese/English mixed speech** is workable on Zipformer bilingual but imperfect on dialect
   and proper nouns; FireRed is noticeably better and slower.
 - **Local models are not shipped.** You download them yourself (~360 MB or ~1.2 GB, see below).
-- **No `.deb` yet**, and `fcitx5-nextless-git` is not in the AUR — the `PKGBUILD` is provided,
-  packaging issues are tracked in [Roadmap](#roadmap).
+- **The `.deb` is a build-it package for now**: `debian/` is in the repo and CI builds + installs
+  + removes it on every PR, but there is no apt repository to pull it from yet, and
+  `fcitx5-nextless-git` is not submitted to the AUR yet (the `PKGBUILD` ships with the repo).
+  Packaging tracking: [Roadmap](#roadmap) / issue #7.
 
 ## Requirements
 
@@ -119,6 +121,28 @@ clipboard round-trip, no focus stealing.
   zh-en mixed speech.
 
 ## Install
+
+### 0. Pick your route
+
+**Arch** — build the provided `PKGBUILD`: `makepkg -si` (produces `fcitx5-nextless-git`).
+
+**Debian / Ubuntu** — build the `.deb` from the shipped `debian/` packaging and install it:
+
+```bash
+sudo apt install -y dpkg-dev debhelper meson ninja-build git \
+  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+git clone https://github.com/RevolutionLA/nextless.git
+cd nextless
+dpkg-buildpackage -us -uc -b
+sudo dpkg -i ../fcitx5-nextless_*_amd64.deb    # or: sudo apt install ../fcitx5-nextless_*.deb
+fcitx5 -r -d
+```
+
+CI builds this package, installs it on a clean runner and removes it again on every PR,
+so `dpkg-buildpackage` is not a second-class path. Model files are deliberately *not* in
+the payload (~1.6 GB) — step 4 below fetches what you need. There is no apt repository to
+pull from yet; if you just want to run the current main, route 1 below is one command.
 
 ### 1. Build
 
@@ -146,9 +170,6 @@ sudo meson install -C build
 > enabled: fcitx5's own `FCITX_CONFIGURATION` / `FCITX_DECLARE_PRIVATE` macros expand to an
 > "extra `;`" that GCC flags on the fcitx5 versions distros package (and the fcitx5 headers are
 > pulled in as system includes for the same reason). That is not our bug to fix.
-
-Arch users can build the provided `PKGBUILD` instead: `makepkg -si` (produces
-`fcitx5-nextless-git`).
 
 ### 2. Load the add-on
 

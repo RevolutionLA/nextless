@@ -8,6 +8,20 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- `.deb` packaging for Debian/Ubuntu (issue #7, first half): shipped `debian/` sources —
+  debhelper 13 + the meson buildsystem, `Rules-Requires-Root: no`, distro layout
+  (`/usr/lib/<multiarch>/fcitx5/nextless.so`, manifest in `/usr/share/fcitx5/addon`,
+  six defaults in `/etc/nextless`), dependency set resolved against the real Ubuntu
+  archive (there is no `libfcitx5-dev` meta package), and **no models in the payload by
+  design** — `nextless-get-models` stays the first-run step. A new CI `deb-package` job
+  builds the package from a clean copy, `dpkg -i`s it into a fresh runner, checks every
+  scan path fcitx5 needs plus an `ldd` without "not found", then removes and purges it
+  and fails on any debris — that job is the clean-environment guarantee; the local build
+  was payload-checked on Ubuntu, no chroot claims. The `PKGBUILD`
+  gained the missing `hotwords.json` backup entry (sixth packaged config). README (en/zh)
+  move packaging from "no .deb" to an Install "pick your route" section; the man page
+  gained an INSTALLING section. Remaining for #7: publishing `fcitx5-nextless-git` to the
+  AUR (the PKGBUILD ships with the repo; submission is a human step on aur.archlinux.org).
 - Hotwords / mishearing correction table (issue #6): `~/.config/nextless/hotwords.json`
   maps `{"what it heard": "what you meant"}` (e.g. Zipformer's habit of turning
   `礼拜二` into `LIBR`). The table post-processes the final text of **every** backend,

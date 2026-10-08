@@ -40,6 +40,14 @@ Enter provider/denoiser switching mode. While holding the trigger key:
 \fB\(ua / k\fP   \-\- previous denoiser
 .br
 \fB\(da / j\fP   \-\- next denoiser
+.SH INSTALLING
+Build from source (\fBmeson setup build --prefix=/usr\fP, \fBninja\fP,
+\fBsudo meson install\fP), or package it: the repository ships a \fBPKGBUILD\fP
+(Arch, \fBmakepkg -si\fP) and \fBdebian/\fP sources (Debian/Ubuntu,
+\fBdpkg-buildpackage -us -uc -b\fP, then \fBdpkg -i\fP the resulting
+\fBfcitx5-nextless_*.deb\fP). ASR models are never part of the package
+payload; run \fBnextless-get-models\fP after installing. Restart fcitx5
+(\fBfcitx5 -r -d\fP) to load the add-on.
 .SH CONFIGURATION
 The trigger key and default backend live in the fcitx5 add-on settings; ASR
 credentials and audio tuning live in \fB~/.config/nextless/\fP.

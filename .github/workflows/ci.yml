@@ -85,6 +85,57 @@ jobs:
             echo "No test log: the build step failed before tests could run."
           fi
 
+  deb-package:
+    name: .deb installs clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev debhelper meson ninja-build git pkg-config \
+            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+            libpulse-dev libebur128-dev libcurl4-openssl-dev \
+            libspeexdsp-dev libsoxr-dev
+
+      - name: Build the package
+        # Build in a copy: dpkg-buildpackage would otherwise see the checkout's
+        # untracked build/ and obj-* dirs as source, and run a nested build in
+        # whatever buildtype they were left in.
+        run: |
+          rm -rf /tmp/pkgsrc && mkdir -p /tmp/pkgsrc
+          tar -C . --exclude=.git --exclude=build --exclude=obj-\* \
+              --exclude=stage-\* --exclude=debian/.debhelper \
+              -cf - . | tar -C /tmp/pkgsrc -xf -
+          cd /tmp/pkgsrc
+          dpkg-buildpackage -us -uc -b -d -jauto
+          dpkg-deb -I /tmp/fcitx5-nextless_*_amd64.deb | grep -E "^ (Package|Depends)"
+
+      - name: Install the built .deb into this clean runner
+        run: |
+          sudo dpkg -i /tmp/fcitx5-nextless_*_amd64.deb || sudo apt-get install -fy
+          test -f /usr/share/fcitx5/addon/nextless.conf
+          test -f /usr/lib/*/fcitx5/nextless.so
+          test -x /usr/bin/nextless-get-models
+          test -f /etc/nextless/hotwords.json
+          ldd /usr/lib/*/fcitx5/nextless.so | grep -q "not found" && { echo "unresolved libs"; exit 1; } || true
+          echo "add-on payload lands where fcitx5 scans"
+
+      - name: Remove it again
+        run: |
+          sudo dpkg -r fcitx5-nextless
+          if dpkg-query -W fcitx5-nextless >/dev/null 2>&1; then
+            [ "$(dpkg-query -W -f='${Status}' fcitx5-nextless)" = "deinstall ok config-files" ] || {
+              echo "package not cleanly deinstalled"; exit 1; }
+          fi
+          test ! -e /usr/share/fcitx5/addon/nextless.conf
+          test ! -e /usr/bin/nextless-get-models
+          sudo dpkg -P fcitx5-nextless
+          test ! -e /etc/nextless/advanced.json
+          echo "remove + purge leave no payload debris"
+
       - name: Upload Meson logs
         if: failure()
         uses: actions/upload-artifact@v4

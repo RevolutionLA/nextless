@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+%:
+	dh $@ --buildsystem=meson
+
+# distro layout: addon under /usr/lib/<multiarch>/fcitx5, manifest under
+# /usr/share/fcitx5/addon, packaged defaults in /etc/nextless (the loader
+# reads the same sysconfdir it was compiled with — see meson.build).
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+override_dh_auto_configure:
+	dh_auto_configure -- --prefix=/usr --sysconfdir=/etc --buildtype=plain
