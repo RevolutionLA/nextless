@@ -8,6 +8,14 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- One-command install (finishes the promise behind issue #7): `v*` tags trigger a
+  `Release` workflow that rebuilds the `.deb` on Ubuntu 24.04, refuses to publish when
+  the tag and `debian/changelog` disagree, and attaches the package plus `sha256sums.txt`
+  to a GitHub Release. `tools/install-deb.sh` consumes exactly that: verify checksum,
+  `apt install` the deb (the package now hard-depends on `fcitx5`, so apt pulls
+  everything from the distro archive), then print the two first-run steps it refuses to
+  do silently (model download, `fcitx5 -r -d`). README (en/zh) lead with the one-liner;
+  building the package yourself stays documented for non-amd64.
 - Reproducible A/B benchmark harness (issue #8): `tools/benchmark/` — `bench_asr`
   drives each backend through the **exact add-on code path** (`AsrProviderRegistry`
   + `transcribe(samples, wavPath)`), `cer.py` implements a documented zh/en

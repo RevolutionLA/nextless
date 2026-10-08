@@ -21,6 +21,8 @@ Architecture: linux-any
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
+ fcitx5 (>= 5.1.0)
+Suggests: fcitx5-configtool
 Description: Push-to-talk voice input add-on for fcitx5 (offline-first)
  Nextless turns any Linux desktop into a push-to-talk dictation surface:
  hold a key (bare modifiers like Right Ctrl included), speak, release, and

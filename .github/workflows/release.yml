@@ -1,0 +1,59 @@
+name: Release
+
+# Push a version tag (v0.2.0, v0.3.1, ...) and this job builds the .deb on
+# Ubuntu 24.04 and publishes it as a GitHub Release asset with sha256sums -
+# that release is what tools/install-deb.sh downloads.
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  debian-release:
+    name: build .deb + publish release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev debhelper meson ninja-build git pkg-config \
+            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
+            libpulse-dev libebur128-dev libcurl4-openssl-dev \
+            libspeexdsp-dev libsoxr-dev
+
+      - name: Build the package (clean copy, same recipe as CI)
+        run: |
+          rm -rf /tmp/pkgsrc && mkdir -p /tmp/pkgsrc
+          tar -C . --exclude=.git --exclude=build --exclude=obj-\* \
+              --exclude=stage-\* --exclude=debian/.debhelper \
+              -cf - . | tar -C /tmp/pkgsrc -xf -
+          cd /tmp/pkgsrc
+          dpkg-buildpackage -us -uc -b -d -jauto
+
+      - name: Refuse to publish on tag/changelog mismatch
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          [ -f "/tmp/fcitx5-nextless_${tag}-1_amd64.deb" ] || {
+            echo "tag ${GITHUB_REF_NAME} does not match debian/changelog version"; exit 1; }
+
+      - name: Checksums + publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /tmp
+          sha256sum fcitx5-nextless_*_amd64.deb > sha256sums.txt
+          cat sha256sums.txt
+          notes="Push-to-talk voice input for fcitx5, offline-first. Install: \`curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash\` then \`nextless-get-models --zipformer --punctuation\` and \`fcitx5 -r -d\`. Models are not in the .deb by design."
+          gh release create "$GITHUB_REF_NAME" \
+            fcitx5-nextless_*_amd64.deb sha256sums.txt \
+            --title "Nextless $GITHUB_REF_NAME" --notes "$notes" \
+            || gh release upload "$GITHUB_REF_NAME" --clobber \
+                 fcitx5-nextless_*_amd64.deb sha256sums.txt
