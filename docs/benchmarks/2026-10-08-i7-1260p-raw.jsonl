@@ -1,0 +1,16 @@
+{"backend":"zipformer","wav":"0.wav","ref":"","cold":true,"audio_ms":10053,"first_ms":2075,"wall_ms":2075,"error":"","text":"昨天是 MONDAY TODAY IS LIBR THE DAY AFTER TOMORROW是星期三"}
+{"backend":"zipformer","wav":"1.wav","ref":"","cold":false,"audio_ms":5100,"first_ms":2047,"wall_ms":2047,"error":"","text":"这是第一种第二种叫呃与 ALWAYS ALWAYS是什么意思啊"}
+{"backend":"zipformer","wav":"2.wav","ref":"","cold":false,"audio_ms":4690,"first_ms":1994,"wall_ms":1994,"error":"","text":"是不是频繁的啊不认识记下来 FREQUENTLY频繁的"}
+{"backend":"zipformer","wav":"3-sichuan.wav","ref":"","cold":false,"audio_ms":7835,"first_ms":2336,"wall_ms":2336,"error":"","text":"子鸡就是在那个在那个就是在清洁里面就是感觉时间都特别好就是好像很正式一样你知道吧"}
+{"backend":"zipformer","wav":"3.wav","ref":"","cold":false,"audio_ms":8830,"first_ms":2373,"wall_ms":2373,"error":"","text":"第一句是个什么时态加了 ES是一般现在时对后面还是时态写上"}
+{"backend":"zipformer","wav":"4-tianjin.wav","ref":"","cold":false,"audio_ms":7809,"first_ms":3091,"wall_ms":3091,"error":"","text":"其实他就是骂每个人都可以守法就这意思法律意识太单薄了而且就是嗯也不顾及到别人的感受"}
+{"backend":"zipformer","wav":"5-henan.wav","ref":"","cold":false,"audio_ms":7990,"first_ms":2742,"wall_ms":2742,"error":"","text":"他这个官一向都通到有时候都通到七八层楼高然后他说过一下就可以交到那个那柱子上"}
+{"backend":"zipformer","summary":true,"files":7,"failures":0,"peak_rss_kb":17444,"child_peak_rss_kb":504080}
+{"backend":"fire_red","wav":"0.wav","ref":"","cold":true,"audio_ms":10053,"first_ms":6474,"wall_ms":6474,"error":"","text":"昨天是 MONDAY TODAY IS礼拜二 THE DAY AFTER TOMORROW是星期三"}
+{"backend":"fire_red","wav":"1.wav","ref":"","cold":false,"audio_ms":5100,"first_ms":4815,"wall_ms":4815,"error":"","text":"这是第一种第二种叫呃与 ALWAYS ALWAYS什么意思啊"}
+{"backend":"fire_red","wav":"2.wav","ref":"","cold":false,"audio_ms":4690,"first_ms":4626,"wall_ms":4626,"error":"","text":"这个是频繁的啊不认识记下来 FREQUENTLY频繁的"}
+{"backend":"fire_red","wav":"3-sichuan.wav","ref":"","cold":false,"audio_ms":7835,"first_ms":6613,"wall_ms":6613,"error":"","text":"自己就是在那个在那个就是在情节里面就是感觉戏演得特别好就是好像很真实一样你知道吧"}
+{"backend":"fire_red","wav":"3.wav","ref":"","cold":false,"audio_ms":8830,"first_ms":6106,"wall_ms":6106,"error":"","text":"第一句是个什么时态加了 E S是一般现在时对吧我们把它时态写上去"}
+{"backend":"fire_red","wav":"4-tianjin.wav","ref":"","cold":false,"audio_ms":7809,"first_ms":5935,"wall_ms":5935,"error":"","text":"其实他就是那每个人都会守法就这意思法律意识太淡薄了而且就是嗯也不顾及到别人的感受"}
+{"backend":"fire_red","wav":"5-henan.wav","ref":"","cold":false,"audio_ms":7990,"first_ms":6279,"wall_ms":6279,"error":"","text":"它这个管一向都通到有时候都通到七八层楼高然后它这管一下就可以浇到那个那柱子上"}
+{"backend":"fire_red","summary":true,"files":7,"failures":0,"peak_rss_kb":17616,"child_peak_rss_kb":1707168}

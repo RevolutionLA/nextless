@@ -84,3 +84,6 @@ test('hotwords', test_hotwords, timeout: 30)
 # layout, idempotency, and "no half-extracted model on failure" (runs
 # against fake file:// release trees, no network).
 test('get_models', find_program('test_get_models.sh'), timeout: 120)
+
+# Issue #8: CER/WER normaliser + table maths (python, stdlib only).
+test('cer_tool', find_program('run_cer_tests.sh'), timeout: 60)

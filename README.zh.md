@@ -259,8 +259,8 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 
 | Provider | 类型 | 体积 | 模型 | 实测 |
 |---|---|---|---|---|
-| `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | i7-1260P 8 线程 RTF ≈ 0.13，约 1 GB RSS；装标点模型后自动带标点 |
-| `fire_red` | 本地 | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | 12 线程 RTF ≈ 0.38，峰值 RSS ~1.7 GB，方言和长句明显更好 |
+| `zipformer` | 本地 | ~360 MB | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20` | 基准脚本实测：热 RTF ≈ 0.37，约 5 秒音频首结果 ≈ 2.3 s，峰值 RSS ~0.5 GB（i7-1260P；见 [docs/benchmarks.md](docs/benchmarks.md)） |
+| `fire_red` | 本地 | ~1.2 GB | `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | 基准脚本实测：热 RTF ≈ 0.82，首结果 ≈ 6.1 s，峰值 RSS ~1.6 GB，方言和长句明显更好（见 [docs/benchmarks.md](docs/benchmarks.md)） |
 | `doubao` | 云端 | — | 豆包流式识别 2.0 | 有标点、数字规整、服务端热词，需要 API key |
 | `qwen` | 云端 | — | Qwen3-ASR-Flash | 需要 API key |
 | `mock` | 测试 | — | — | 固定返回 `hello world`，用来验证按键和采集链路 |
@@ -356,7 +356,9 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 - [x] 热词 / 自定义词组：`~/.config/nextless/hotwords.json` 错词纠正表（所有后端）；模型内部偏置仍未接
 - [x] 首次运行向导，自动选对 sherpa-onnx 构建（x86_64 / aarch64）—— `nextless-get-models`
 - [ ] `.deb` 打包（以及 AUR 上的 `fcitx5-nextless`）
-- [ ] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
+- [x] A/B 基准脚手架，公开每个模型的 CER / 延迟 / RTF / RSS
+      （`tools/benchmark/` + [docs/benchmarks.md](docs/benchmarks.md)；CER 列等核过源的转写
+      ——语料自己录，方法已写进文档）
 - [ ] 声音克隆 / 个人纠错学习 —— 还没定，先去看讨论区
 - [x] CI：GCC 下 build × test 矩阵 + `-Dwerror=true`，另加一个开诊断日志的构建
 - [x] 中文文档（就是这一份）

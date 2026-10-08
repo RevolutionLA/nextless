@@ -1,0 +1,9 @@
+date: 2026-10-08T09:36:35+08:00
+host: (redacted)
+kernel: 7.0.0-34-generic
+cpu: 12th Gen Intel(R) Core(TM) i7-1260P
+threads: 16
+governor: powersave
+mem: 15562408 kB
+backends: zipformer fire_red
+corpus: /tmp/nx-corpus
