@@ -315,9 +315,18 @@ experimental resident-server path and are **not** required.)
 
 ## Configuration
 
+Almost everything is set through the **fcitx5 add-on config panel**
+(Fcitx5 Configuration → Add-ons → Nextless → Configure): the push-to-talk key,
+default provider, activation/notification/debounce timing, denoiser, local model
+dirs & threads, punctuation toggle, and cloud API keys. Saving there writes the
+JSON files below in place (preserving any key the panel does not own) and pushes
+the new values into the running provider, so changes take effect the moment you
+save — no restart, no hand-editing. The files are still the single source of
+truth and safe to edit directly; on next load the panel reflects them.
+
 | File | Purpose |
 |---|---|
-| `~/.config/fcitx5/conf/nextless.conf` | trigger key (`[Hotkey]`), `DefaultProvider` |
+| `~/.config/fcitx5/conf/nextless.conf` | trigger key (`[Hotkey]`), `DefaultProvider` (fcitx5's own store for the two native add-on options) |
 | `~/.config/nextless/nextless.json` | `activation_msec` (default 300), notification timeout, debounce |
 | `~/.config/nextless/audio.json` | `denoise`: `none` \| `speexdsp` \| `deepfilter` |
 | `NEXTLESS_DEEP_FILTER` (env) | path to a system `deep-filter` binary, overrides the bundled location |
@@ -339,7 +348,7 @@ never rewrite real speech until you add entries yourself.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 18 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser
+meson test -C build            # 19 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser, panel JSON patcher
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner

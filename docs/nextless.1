@@ -49,8 +49,12 @@ Build from source (\fBmeson setup build --prefix=/usr\fP, \fBninja\fP,
 payload; run \fBnextless-get-models\fP after installing. Restart fcitx5
 (\fBfcitx5 -r -d\fP) to load the add-on.
 .SH CONFIGURATION
-The trigger key and default backend live in the fcitx5 add-on settings; ASR
-credentials and audio tuning live in \fB~/.config/nextless/\fP.
+The full settings panel lives in the fcitx5 add-on configuration (Configure
+Nextless under Add-ons): trigger key, default backend, timing, denoiser, model
+dirs, threads, punctuation and cloud API keys. Saving writes the JSON files in
+\fB~/.config/nextless/\fP in place (unknown keys are preserved) and applies to
+the running engine immediately; the files remain the source of truth and can
+still be edited by hand.
 .SS Add-on settings (trigger key, default backend)
 .TP
 \fB~/.config/fcitx5/conf/nextless.conf\fP

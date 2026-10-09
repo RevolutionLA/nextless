@@ -4,6 +4,7 @@
 #include "temp_wav.h"
 
 #include <curl/curl.h>
+#include <cstdlib>
 #include <unistd.h>
 #include <cstdio>
 #include <chrono>
@@ -87,6 +88,10 @@ QwenAsrProvider::~QwenAsrProvider() {
 
 void QwenAsrProvider::setConfig(const std::string &key, const std::string &value) {
     if (key == "api_key") apiKey_ = value;
+    else if (key == "timeout_sec") {
+        int v = std::atoi(value.c_str());
+        if (v > 0) timeout_ = v;
+    }
 }
 
 void QwenAsrProvider::transcribe(std::vector<int16_t> samples, const std::string &wavPath) {

@@ -4,6 +4,7 @@
 #include "temp_wav.h"
 
 #include <curl/curl.h>
+#include <cstdlib>
 #include <unistd.h>
 #include <sys/random.h>
 #include <cstdio>
@@ -150,6 +151,16 @@ DoubaoAsrProvider::~DoubaoAsrProvider() {
 void DoubaoAsrProvider::setConfig(const std::string &key, const std::string &value) {
     if (key == "api_key") apiKey_ = value;
     else if (key == "resource_id") resourceId_ = value;
+    else if (key == "poll_interval_msec" || key == "max_polls" ||
+             key == "submit_timeout_sec" || key == "query_timeout_sec") {
+        // 配置面板直推调优参数；transcribe() 每次从成员拷 Task，下一句生效。
+        int v = std::atoi(value.c_str());
+        if (v <= 0) return;
+        if (key == "poll_interval_msec") pollIntervalMsec_ = v;
+        else if (key == "max_polls") maxPolls_ = v;
+        else if (key == "submit_timeout_sec") submitTimeout_ = v;
+        else queryTimeout_ = v;
+    }
 }
 
 void DoubaoAsrProvider::transcribe(std::vector<int16_t> samples, const std::string &wavPath) {

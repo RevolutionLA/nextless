@@ -4,6 +4,7 @@
 #include "temp_wav.h"
 
 #include <unistd.h>
+#include <cstdlib>
 #include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
@@ -52,8 +53,18 @@ ZipformerAsrProvider::~ZipformerAsrProvider() {
 
 void ZipformerAsrProvider::setConfig(const std::string &key,
                                       const std::string &value) {
+    // 配置面板保存后会把当前后端的这几个键直接推进来；transcribe()
+    // 每次按值读成员，下一句立刻用新配置，不需要重建 provider。
     if (key == "model_dir") {
-        modelDir_ = value;
+        if (!value.empty()) modelDir_ = value;
+    } else if (key == "bin_path") {
+        if (!value.empty()) sherpaBin_ = value;
+    } else if (key == "num_threads" || key == "timeout_sec") {
+        int v = std::atoi(value.c_str());
+        if (v > 0) {
+            if (key == "num_threads") numThreads_ = v;
+            else timeoutSec_ = v;
+        }
     }
 }
 

@@ -87,3 +87,10 @@ test('get_models', find_program('test_get_models.sh'), timeout: 120)
 
 # Issue #8: CER/WER normaliser + table maths (python, stdlib only).
 test('cer_tool', find_program('run_cer_tests.sh'), timeout: 60)
+
+# Config-panel JSON writer: round-trips through the same extractors the
+# providers use (issue: full settings panel).
+test_json_patch = executable('test_json_patch',
+  'test_json_patch.cpp',
+  dependencies: [asr_provider_dep])
+test('json_patch', test_json_patch)

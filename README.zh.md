@@ -281,9 +281,15 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 
 ## 配置文件
 
+绝大部分可选项都在 **fcitx5 配置面板**里（Fcitx5 设置 → 附加组件 → Nextless → 配置）：
+触发键、默认后端、激活/通知/防抖、降噪、本地模型路径与线程、标点开关、云端 API key。
+面板保存时会把值**定点写回**下面这些 JSON 文件（只动面板拥有的键，你手加的键原样保留），
+并立刻推给当前后端——保存即生效，不用重启、不用改文件。文件仍是唯一真相，直接编辑也安全，
+下次加载面板会如实反映文件内容。
+
 | 文件 | 作用 |
 |---|---|
-| `~/.config/fcitx5/conf/nextless.conf` | 触发键（`[Hotkey]`）、`DefaultProvider` |
+| `~/.config/fcitx5/conf/nextless.conf` | 触发键（`[Hotkey]`）、`DefaultProvider`（这两项是 fcitx5 原生选项，存在 fcitx 自己的 INI） |
 | `~/.config/nextless/nextless.json` | `activation_msec`（默认 300）、通知超时、防抖 |
 | `~/.config/nextless/audio.json` | `denoise`：`none` \| `speexdsp` \| `deepfilter` |
 | `NEXTLESS_DEEP_FILTER`（环境变量） | 指向系统里的 `deep-filter`，优先于默认安装路径 |
@@ -305,7 +311,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 18 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约、CER/WER 归一化
+meson test -C build            # 19 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约、CER/WER 归一化、面板 JSON 定点写回
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
