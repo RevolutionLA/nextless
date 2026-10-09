@@ -48,8 +48,9 @@ already installed.
 
 Options:
   --backend=zipformer|firered|both   which model(s) to install
-                                     (without it: asks on a terminal,
-                                      defaults to "both" elsewhere)
+                                     (without it: asks on a terminal;
+                                      with no terminal it stops and asks
+                                      for an explicit choice - see -y)
   --arch=x86_64|aarch64              override `uname -m` (for testing the
                                      asset-name mapping without ARM hardware)
   --dry-run                          print exactly what would happen; no
@@ -159,9 +160,26 @@ case "$backend" in
     firered)       want_firered=true ;;
 esac
 
-# Non-interactive without an explicit --backend defaults to both; state it.
-if [ -z "$backend" ] && [ ! -t 0 ]; then
-    echo "get_models: no terminal and no --backend, installing both models."
+# Non-interactive without an explicit --backend: stop and ask (issue #45).
+# "Documented default" and "consent-free 1.8 GB" are different things on a
+# metered or metered-looking connection, and `curl … | bash` reaches this
+# branch with nobody at the keyboard. -y is the scripted opt-in; --dry-run
+# still works so docs and tests can probe without a terminal.
+if [ -z "$backend" ] && [ ! -t 0 ] && ! $dry_run; then
+    if $assume_yes; then
+        echo "get_models: no terminal, --backend not given, -y accepted: installing both."
+    else
+        {
+            echo "get_models: no terminal and no --backend, so nothing was downloaded."
+            echo "  Choose one explicitly:"
+            echo "    nextless-get-models --backend=zipformer --punctuation   (~360 MB + 62 MB, the usual pick)"
+            echo "    nextless-get-models --backend=firered   --punctuation   (~800 MB + 62 MB, more accurate, slower)"
+            echo "    nextless-get-models --backend=both                      (~1.2 GB, plus ~90 MB runtime)"
+            echo "  Or accept the default (both) in one go:  nextless-get-models --backend=both -y"
+            echo "  Nothing on disk changed. --dry-run shows the exact URLs."
+        } >&2
+        exit 1
+    fi
 fi
 
 # Interactive pick, unless --backend was given or stdin is not a terminal.

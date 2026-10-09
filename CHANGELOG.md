@@ -15,6 +15,16 @@ user-visible change rather than one per commit.
   broken) with nothing in the panel to reveal why. The trip is logged once to
   stderr and to the diagnostics log; raw text keeps flowing either way.
 
+### Changed
+- `nextless-get-models` no longer installs **both** models (~1.8 GB) just because
+  nobody was at the keyboard (issue #45). With no terminal and no `--backend` it
+  now stops before touching the network and prints the three explicit choices
+  with their sizes; `--backend=both -y` (or any `--backend=…`) is the scripted
+  route, and `--dry-run` still works headless. The interactive picker is
+  unchanged, and `install-deb.sh` already printed an explicit
+  `--zipformer --punctuation` line, so the documented first-run path is
+  unaffected.
+
 ### Fixed
 - `tools/install-deb.sh` now **fails closed when it cannot verify the digest**
   (issue #43). Previously a missing `sha256sums.txt` or an asset not listed in it
