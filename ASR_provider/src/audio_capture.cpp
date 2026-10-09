@@ -8,6 +8,7 @@
 #include <soxr.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <ctime>
@@ -142,6 +143,49 @@ static std::string secureCaptureDir() {
     return cached;
 }
 
+// 兜底模式下兄弟目录里可能有别的会话正在写的录音，只清理放了超过
+// kOrphanMaxAgeSec 秒的文件；正常录音整个生命周期只有几秒。
+static constexpr int kOrphanMaxAgeSec = 600;
+
+// 文件名 nextless_cap_<pid>_<n>.wav 自带写它的进程 pid，这是比时间戳更准的
+// 归属信息（issue #42）：XDG 模式下当前目录就是 /run/user/<uid>/nextless，
+// 同一用户的每个 fcitx5 进程共用它，构造 AudioCapture 时无条件清扫当前目录
+// 会删掉另一个会话正在写的那句。
+// 返回 1 = owner 还活着，0 = 已经死了（崩溃残留），-1 = 名字里解析不出 pid。
+static int wavOwnerAlive(const std::string &filename) {
+    // "nextless_cap_" 前缀 13 字节 + ".wav" 4 字节，中间至少还要有 1 位 pid。
+    if (filename.size() < 13 + 1 + 4 ||
+        filename.compare(0, 13, "nextless_cap_") != 0 ||
+        filename.compare(filename.size() - 4, 4, ".wav") != 0)
+        return -1;
+    std::string stem = filename.substr(13, filename.size() - 13 - 4);
+    auto us = stem.find('_');
+    std::string pidText = us == std::string::npos ? stem : stem.substr(0, us);
+    if (pidText.empty() ||
+        pidText.find_first_not_of("0123456789") != std::string::npos)
+        return -1;
+    long pid = strtol(pidText.c_str(), nullptr, 10);
+    if (pid <= 0) return -1;
+    if (kill(static_cast<pid_t>(pid), 0) == 0) return 1;
+    if (errno == EPERM) return 1;  // 存在但归别人，仍然算活着
+    return 0;                      // ESRCH
+}
+
+// 可以清的条件：owner 已经死了（崩溃残留，立刻回收），或者文件放了超过
+// kOrphanMaxAgeSec 秒 —— pid 被复用、或名字里根本没有可解析的 pid 时，
+// 时间戳是唯一的兜底。两者都不满足就留着：宁可留一个残留文件，
+// 也不能删掉别人正在录的那一句。
+static bool isStaleCaptureWav(const std::filesystem::path &p,
+                              const std::string &filename) {
+    if (wavOwnerAlive(filename) == 0) return true;
+    std::error_code mec;
+    auto mtime = std::filesystem::last_write_time(p, mec);
+    if (mec) return false;
+    auto age = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::file_clock::now() - mtime).count();
+    return age >= kOrphanMaxAgeSec;
+}
+
 // 删除 dirPath 里所有 nextless_cap_*.wav。每个 filesystem 调用用独立的
 // error_code —— 曾共享一个 ec 并在循环顶部 `if (ec) break`，一次预期内
 // 的失败（比如 remove 非空目录）会把后续所有扫描连带中止。
@@ -161,6 +205,7 @@ static bool sweepWavsIn(const std::filesystem::path &dirPath) {
         if (filename.rfind("nextless_cap_", 0) != 0 ||
             filename.size() <= 13 ||
             filename.substr(filename.size() - 4) != ".wav") continue;
+        if (!isStaleCaptureWav(p, filename)) continue;
         std::error_code rec;
         if (std::filesystem::remove(p, rec) && !rec) {
             removed = true;
@@ -169,10 +214,6 @@ static bool sweepWavsIn(const std::filesystem::path &dirPath) {
     }
     return removed;
 }
-
-// 兜底模式下兄弟目录里可能有别的会话正在写的录音，只清理放了超过
-// kOrphanMaxAgeSec 秒的文件；正常录音整个生命周期只有几秒。
-static constexpr int kOrphanMaxAgeSec = 600;
 
 // 启动时清理孤儿文件（来自之前崩溃的会话）。除当前目录外，还扫描其
 // 同级的 nextless* 目录 —— 兜底模式下旧会话的 mkdtemp 目录名不可预测，
@@ -188,7 +229,10 @@ static void sweepOrphanedWavs(const std::string &dir) {
         current = std::filesystem::path(dir);
     }
 
-    // 当前目录：固定路径模式下崩溃残留就落在这里，无条件清理。
+    // 当前目录：固定路径（XDG）模式下它是 /run/user/<uid>/nextless，同用户多个
+    // 会话共享，所以同样只清 owner 已死或足够陈旧的文件（issue #42）。曾经这里
+    // 是无条件清扫，重启竞争 / 双会话 / 跑测试套件时会把另一个会话正在写的那句
+    // 删掉，对方拿到的是 "failed to read WAV"。
     sweepWavsIn(current);
 
     // 先快照兄弟目录名再处理：边迭代边删除会让部分文件系统上的
@@ -224,12 +268,9 @@ static void sweepOrphanedWavs(const std::string &dir) {
             if (filename.rfind("nextless_cap_", 0) != 0 ||
                 filename.size() <= 13 ||
                 filename.substr(filename.size() - 4) != ".wav") continue;
-            std::error_code mec;
-            auto mtime = std::filesystem::last_write_time(f, mec);
-            if (mec) continue;
-            auto age = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::file_clock::now() - mtime).count();
-            if (age < kOrphanMaxAgeSec) continue;
+            // 和当前目录同一条规则（owner 已死 或 足够陈旧）—— issue #42 之后
+            // 两边不能再各写各的，否则"共享目录"这一侧又会退回只看时间。
+            if (!isStaleCaptureWav(f, filename)) continue;
             std::error_code rec;
             if (std::filesystem::remove(f, rec) && !rec) {
                 fprintf(stderr, "Nextless Capture: swept orphaned WAV %s/%s\n",
