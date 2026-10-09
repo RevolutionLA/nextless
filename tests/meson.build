@@ -88,6 +88,12 @@ test('get_models', find_program('test_get_models.sh'), timeout: 120)
 # Issue #8: CER/WER normaliser + table maths (python, stdlib only).
 test('cer_tool', find_program('run_cer_tests.sh'), timeout: 60)
 
+# Issue #43: install-deb.sh digest gate — verifies the installer fails closed
+# when the sha256 is missing/unlisted, that a mismatch blocks apt, and that
+# only --allow-unverified / ALLOW_UNVERIFIED=1 may proceed. root, apt and the
+# network are stubbed on PATH, so it runs in CI like any other test.
+test('install_deb', find_program('test_install_deb.sh'), timeout: 60)
+
 # Config-panel JSON writer: round-trips through the same extractors the
 # providers use (issue: full settings panel).
 test_json_patch = executable('test_json_patch',

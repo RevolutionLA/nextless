@@ -5,6 +5,33 @@ All notable changes to Nextless are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and this project keeps one line per
 user-visible change rather than one per commit.
 
+## [Unreleased]
+
+### Fixed
+- `tools/install-deb.sh` now **fails closed when it cannot verify the digest**
+  (issue #43). Previously a missing `sha256sums.txt` or an asset not listed in it
+  printed a warning and installed anyway; both are exactly what a tampered or
+  half-replaced publish looks like, so they now stop, and continuing requires an
+  explicit `--allow-unverified` / `ALLOW_UNVERIFIED=1`. The old path could also
+  print "sha256 verified" for an asset it had never checked. Trust model stated in
+  SECURITY.md: the checksums ship on the same release, so this is TOFU.
+- Several of the installer's own error messages were unreachable. Under
+  `set -euo pipefail` a `grep` that found nothing made the enclosing assignment
+  exit the script silently, killing the "could not resolve latest release",
+  "no amd64 .deb asset" and "asset not listed" branches. Those greps are now
+  guarded, so the script stops where it intends to stop and says why.
+- The `Release` workflow is triggered by `v*` tags only (issue #46). Its
+  `workflow_dispatch` entry was broken by construction: dispatching from a branch
+  sets `GITHUB_REF_NAME` to that branch, so the tag-vs-`debian/changelog` gate
+  could only ever fail. Manual dry-runs belong on a branch, not on the release
+  contract.
+- New contract test `tests/test_install_deb.sh` runs the shipped installer against
+  stubbed `curl`/`id`/`apt-get`/`dpkg-query` (20 tests): verified install, tampered
+  asset, wrong digest, unlisted asset, unreachable sums file, release without
+  checksums, both opt-ins, the API-403 redirect fallback (still verified, and still
+  refusing when it cannot verify), and non-root. Reverting the digest gate fails the
+  suite; it is not an assertion that can silently rot.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

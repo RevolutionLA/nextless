@@ -135,7 +135,11 @@ curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/in
 
 The script ends by printing the two steps it will not do for you: `nextless-get-models
 --zipformer --punctuation` (models are deliberately not in the .deb) and `fcitx5 -r -d`.
-amd64 only; other architectures build the package themselves:
+Before installing it stops if it cannot match the `.deb` against the release's
+`sha256sums.txt` — an unreachable digest file or an unlisted asset is what a tampered
+publish looks like, so that path needs an explicit opt-in:
+`... | sudo bash -s -- --allow-unverified`. amd64 only; other architectures build the
+package themselves:
 
 ```bash
 sudo apt install -y dpkg-dev debhelper meson ninja-build git \
@@ -348,7 +352,7 @@ never rewrite real speech until you add entries yourself.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 19 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser, panel JSON patcher
+meson test -C build            # 20 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser, panel JSON patcher, installer digest gate
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner

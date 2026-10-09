@@ -110,7 +110,10 @@ curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/in
 ```
 
 脚本最后会打印它不会替你做的那两步：`nextless-get-models --zipformer --punctuation`
-（模型刻意不进包）和 `fcitx5 -r -d`。目前只提供 amd64；其他架构自行构建：
+（模型刻意不进包）和 `fcitx5 -r -d`。装之前它会先拿 `.deb` 和 Release 上的
+`sha256sums.txt` 比对；校验文件取不到、或这个包不在清单里——正是发布产物被动过的样子——
+脚本直接停下，要你显式确认才继续：`... | sudo bash -s -- --allow-unverified`。
+目前只提供 amd64；其他架构自行构建：
 
 ```bash
 sudo apt install -y dpkg-dev debhelper meson ninja-build git \
@@ -311,7 +314,7 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 19 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约、CER/WER 归一化、面板 JSON 定点写回
+meson test -C build            # 20 个单测：注册表、配置回落、采集、队列、静音、curl 取消、降噪回落、缺失组件提示、采集目录清扫、标点、热词、get_models 契约、CER/WER 归一化、面板 JSON 定点写回、安装脚本校验门
 ```
 
 跑测试需要一个 PulseAudio 服务（采集用例会真的开一条流）；无桌面的 runner 上
