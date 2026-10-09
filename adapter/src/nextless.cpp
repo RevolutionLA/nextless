@@ -46,6 +46,9 @@
 #include "diagnostic_log.h"
 #include "output_handler.h"
 #include "nextless_config.h"
+#include "json_patch.h"   // 面板保存时定点写回 JSON
+#include <sys/stat.h>
+#include <cstdlib>
 #include "panel_status.h"
 
 // notifications addon 公共 API (跨 addon 调用, 仅用于显示切换信息)
@@ -66,6 +69,82 @@ static std::string diagnosticHash(std::string_view value) {
 }
 
 // 配置: 定义 addon 的可配置选项
+// ---- 配置面板 ----
+// JSON 文件（~/.config/nextless/）永远是唯一真相：打开面板时从文件回填
+// （seedPanelFromJson），保存时把面板值规范化后定点写回文件（syncToJsonFiles，
+// 只动我们拥有的键、保留用户手加的其他键），再推到当前 provider。
+// Hotkey/DefaultProvider 留在 fcitx 自己的 INI 里（按键绑定是 fcitx 原生行为，
+// provider 选择本来就走 config_）。
+FCITX_CONFIGURATION(
+    NextlessBehaviorConfig,
+    fcitx::Option<int> activationMsec{this, "ActivationMsec",
+        _("Activation threshold (msec): press-release shorter than this is a no-op"), 300};
+    fcitx::Option<int> notificationTimeoutMsec{this, "NotificationTimeoutMsec",
+        _("On-screen notification duration (msec)"), 2000};
+    fcitx::Option<int> debounceCount{this, "DebounceCount",
+        _("Debounce count"), 2};
+)
+
+FCITX_CONFIGURATION(
+    NextlessAudioConfig,
+    fcitx::Option<std::string> denoise{this, "Denoise",
+        _("Denoiser: none | speexdsp | deepfilter"), "speexdsp"};
+    fcitx::Option<std::string> lufsTarget{this, "LufsTarget",
+        _("Loudness target (LUFS), e.g. -16"), "-16"};
+    fcitx::Option<int> speexLevel{this, "SpeexLevel",
+        _("Speex denoise strength (-50..0 dB)"), -15};
+    fcitx::Option<std::string> crestThreshold{this, "CrestThreshold",
+        _("Silence crest-factor threshold, e.g. 2.4"), "2.4"};
+)
+
+FCITX_CONFIGURATION(
+    NextlessEngineConfig,
+    fcitx::Option<int> numThreads{this, "NumThreads",
+        _("Local ASR inference threads (0 = machine default)"), 0};
+    fcitx::Option<int> timeoutSec{this, "TimeoutSec",
+        _("Local recognition timeout (sec)"), 120};
+    fcitx::Option<std::string> zipformerModelDir{this, "ZipformerModelDir",
+        _("Zipformer model dir (empty = keep current)"), ""};
+    fcitx::Option<std::string> fireRedModelDir{this, "FireRedModelDir",
+        _("FireRed model dir (empty = keep current)"), ""};
+    fcitx::Option<std::string> zipformerBin{this, "ZipformerBin",
+        _("sherpa-onnx streaming binary (empty = keep current)"), ""};
+    fcitx::Option<std::string> fireRedBin{this, "FireRedBin",
+        _("sherpa-onnx offline binary (empty = keep current)"), ""};
+)
+
+FCITX_CONFIGURATION(
+    NextlessPunctuationConfig,
+    fcitx::Option<bool> enabled{this, "Enabled",
+        _("Punctuate results locally (needs the punctuation model)"), true};
+    fcitx::Option<std::string> modelDir{this, "ModelDir",
+        _("Punctuation model dir (empty = keep current)"), ""};
+    fcitx::Option<std::string> binPath{this, "BinPath",
+        _("sherpa-onnx-offline-punctuation binary (empty = keep current)"), ""};
+    fcitx::Option<int> timeoutSec{this, "TimeoutSec",
+        _("Punctuation timeout (sec); overruns submit unpunctuated text"), 5};
+)
+
+FCITX_CONFIGURATION(
+    NextlessCloudConfig,
+    fcitx::Option<std::string> doubaoApiKey{this, "DoubaoApiKey",
+        _("Doubao API key (stored plain-text in doubao.json)"), ""};
+    fcitx::Option<std::string> doubaoResourceId{this, "DoubaoResourceId",
+        _("Doubao resource id"), ""};
+    fcitx::Option<int> doubaoPollIntervalMsec{this, "DoubaoPollIntervalMsec",
+        _("Doubao poll interval (msec)"), 800};
+    fcitx::Option<int> doubaoMaxPolls{this, "DoubaoMaxPolls",
+        _("Doubao max polls before giving up"), 75};
+    fcitx::Option<int> doubaoSubmitTimeoutSec{this, "DoubaoSubmitTimeoutSec",
+        _("Doubao submit timeout (sec)"), 30};
+    fcitx::Option<int> doubaoQueryTimeoutSec{this, "DoubaoQueryTimeoutSec",
+        _("Doubao query timeout (sec)"), 15};
+    fcitx::Option<std::string> qwenApiKey{this, "QwenApiKey",
+        _("Qwen API key (stored plain-text in qwen.json)"), ""};
+    fcitx::Option<int> qwenTimeoutSec{this, "QwenTimeoutSec",
+        _("Qwen request timeout (sec)"), 60};
+)
+
 FCITX_CONFIGURATION(
     NextlessConfig,
     fcitx::KeyListOption hotkey{
@@ -77,6 +156,16 @@ FCITX_CONFIGURATION(
                                  fcitx::KeyConstrainFlag::AllowModifierLess})};
     fcitx::Option<std::string> defaultProvider{
         this, "DefaultProvider", _("Default ASR Provider"), "zipformer"};
+    fcitx::Option<NextlessBehaviorConfig> behavior{this, "Behavior",
+        _("Behavior & timing")};
+    fcitx::Option<NextlessAudioConfig> audio{this, "Audio",
+        _("Capture & denoise")};
+    fcitx::Option<NextlessEngineConfig> engine{this, "Engine",
+        _("Local engines (zipformer / FireRed)")};
+    fcitx::Option<NextlessPunctuationConfig> punctuation{this, "Punctuation",
+        _("Local punctuation")};
+    fcitx::Option<NextlessCloudConfig> cloud{this, "Cloud",
+        _("Cloud providers (Doubao / Qwen)")};
 );
 
 // NextlessAddon — Nextless 语音输入插件的 addon 主体
@@ -154,6 +243,7 @@ public:
     // 配置读写
     void reloadConfig() override {
         readAsIni(config_, confFile);
+        seedPanelFromJson();
         FCITX_INFO() << "Nextless: hotkeys " << hotkeyToString()
                      << ", provider " << config_.defaultProvider.value();
     }
@@ -162,11 +252,16 @@ public:
     }
     void setConfig(const fcitx::RawConfig &config) override {
         config_.load(config, true);
+        normalizePanel();
         safeSaveAsIni(config_, confFile);
+        syncToJsonFiles();
+        applyLive();
         // 换键立即生效（onKeyEvent 每次读 config_）；只有从别的键换成
         // CapsLock 时才需要额外的 uinput 反弹设备，那种情况重启一次 fcitx5。
         if (triggerNeedsRevert() && uinputFd_ < 0) initUinput();
-        FCITX_INFO() << "Nextless: hotkeys now " << hotkeyToString();
+        FCITX_INFO() << "Nextless: config panel saved; hotkeys now " << hotkeyToString()
+                     << ", provider " << config_.defaultProvider.value()
+                     << ", denoise " << config_.audio->denoise.value();
     }
 
 private:
@@ -174,6 +269,232 @@ private:
     uint64_t activationUsec_ = 300 * 1000;  // from nextless.json: activation_msec
     int notificationTimeout_ = 2000;         // from nextless.json: notification_timeout
     int debounceCount_ = 2;                   // from nextless.json: debounce_count
+
+    // ---- 配置面板 <-> JSON 文件 ----
+    // seed：打开面板时以文件为准回填；save：规范化 -> 定点写回 -> 运行时/
+    // 当前 provider 立即生效。空字符串的 dir/bin/key 字段 = 保持现状不写。
+    void seedPanelFromJson() {
+        auto nj = nextless::readConfigFile("nextless.json");
+        auto *b = config_.behavior.mutableValue();
+        b->activationMsec.setValue(nextless::jsonInt(nj, "activation_msec", 300));
+        b->notificationTimeoutMsec.setValue(nextless::jsonInt(nj, "notification_timeout", 2000));
+        b->debounceCount.setValue(nextless::jsonInt(nj, "debounce_count", 2));
+
+        auto aj = nextless::readConfigFile("audio.json");
+        auto *a = config_.audio.mutableValue();
+        auto dn = nextless::jsonStr(aj, "denoise", "speexdsp");
+        if (isKnownDenoiser(dn)) a->denoise.setValue(dn);
+        auto asec = nextless::advancedSection("audio");
+        a->lufsTarget.setValue(fmtDouble(nextless::jsonDouble(asec, "lufs_target", -16.0), "-16"));
+        a->speexLevel.setValue(nextless::jsonInt(asec, "speex_level", -15));
+        a->crestThreshold.setValue(fmtDouble(nextless::jsonDouble(asec, "crest_threshold", 2.4), "2.4"));
+
+        auto zsec = nextless::advancedSection("zipformer");
+        auto fsec = nextless::advancedSection("fire_red");
+        auto *e = config_.engine.mutableValue();
+        e->numThreads.setValue(nextless::jsonInt(zsec, "num_threads", 0));
+        e->timeoutSec.setValue(nextless::jsonInt(zsec, "timeout_sec", 120));
+        e->zipformerModelDir.setValue(nextless::jsonStr(zsec, "model_dir", ""));
+        e->zipformerBin.setValue(nextless::jsonStr(zsec, "bin_path", ""));
+        e->fireRedModelDir.setValue(nextless::jsonStr(fsec, "model_dir", ""));
+        e->fireRedBin.setValue(nextless::jsonStr(fsec, "bin_path", ""));
+
+        auto psec = nextless::advancedSection("punctuation");
+        auto *p = config_.punctuation.mutableValue();
+        p->enabled.setValue(nextless::jsonBool(psec, "enabled", true));
+        p->modelDir.setValue(nextless::jsonStr(psec, "model_dir", ""));
+        p->binPath.setValue(nextless::jsonStr(psec, "bin_path", ""));
+        p->timeoutSec.setValue(nextless::jsonInt(psec, "timeout_sec", 5));
+
+        auto dsec = nextless::advancedSection("doubao");
+        auto qsec = nextless::advancedSection("qwen");
+        auto dj = nextless::readConfigFile("doubao.json");
+        auto qj = nextless::readConfigFile("qwen.json");
+        auto *c = config_.cloud.mutableValue();
+        c->doubaoApiKey.setValue(nextless::jsonStr(dj, "api_key", ""));
+        c->doubaoResourceId.setValue(nextless::jsonStr(dj, "resource_id", ""));
+        c->doubaoPollIntervalMsec.setValue(nextless::jsonInt(dsec, "poll_interval_msec", 800));
+        c->doubaoMaxPolls.setValue(nextless::jsonInt(dsec, "max_polls", 75));
+        c->doubaoSubmitTimeoutSec.setValue(nextless::jsonInt(dsec, "submit_timeout_sec", 30));
+        c->doubaoQueryTimeoutSec.setValue(nextless::jsonInt(dsec, "query_timeout_sec", 15));
+        c->qwenApiKey.setValue(nextless::jsonStr(qj, "api_key", ""));
+        c->qwenTimeoutSec.setValue(nextless::jsonInt(qsec, "timeout_sec", 60));
+    }
+
+    static bool isKnownDenoiser(const std::string &v) {
+        for (const auto &n : denoiserList())
+            if (n == v) return true;
+        return false;
+    }
+
+    static std::string fmtDouble(double v, const char *fallback) {
+        if (!(v > -1e9 && v < 1e9)) return fallback;
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.6g", v);
+        return buf;
+    }
+
+    static std::string normalizeDouble(const std::string &s, const char *fallback,
+                                      double lo, double hi) {
+        char *end = nullptr;
+        double v = std::strtod(s.c_str(), &end);
+        if (end == s.c_str()) return fallback;
+        while (end && *end == ' ') end++;
+        if (end && *end != '\0') return fallback;
+        if (!(v >= lo && v <= hi)) return fallback;
+        return fmtDouble(v, fallback);
+    }
+
+    void normalizePanel() {
+        auto clampTo = [](fcitx::Option<int> &opt, int lo, int hi) {
+            int v = opt.value();
+            if (v < lo) v = lo;
+            if (v > hi) v = hi;
+            opt.setValue(v);
+        };
+        auto *b = config_.behavior.mutableValue();
+        clampTo(b->activationMsec, 0, 10000);
+        clampTo(b->notificationTimeoutMsec, 200, 10000);
+        clampTo(b->debounceCount, 0, 16);
+        auto *a = config_.audio.mutableValue();
+        if (!isKnownDenoiser(a->denoise.value())) a->denoise.setValue("speexdsp");
+        a->lufsTarget.setValue(normalizeDouble(a->lufsTarget.value(), "-16", -60.0, -3.0));
+        clampTo(a->speexLevel, -50, 0);
+        a->crestThreshold.setValue(normalizeDouble(a->crestThreshold.value(), "2.4", 1.0, 20.0));
+        auto *e = config_.engine.mutableValue();
+        clampTo(e->numThreads, 0, 128);
+        clampTo(e->timeoutSec, 5, 600);
+        auto *p = config_.punctuation.mutableValue();
+        clampTo(p->timeoutSec, 1, 60);
+        auto *c = config_.cloud.mutableValue();
+        clampTo(c->doubaoPollIntervalMsec, 100, 10000);
+        clampTo(c->doubaoMaxPolls, 1, 1000);
+        clampTo(c->doubaoSubmitTimeoutSec, 1, 300);
+        clampTo(c->doubaoQueryTimeoutSec, 1, 300);
+        clampTo(c->qwenTimeoutSec, 1, 300);
+        const auto &id = config_.defaultProvider.value();
+        bool known = false;
+        for (const auto &f : nextless::AsrProviderRegistry::instance().listFactories())
+            if (f.first == id) known = true;
+        if (!known) config_.defaultProvider.setValue("zipformer");
+    }
+
+    int effectiveThreads() const {
+        int v = config_.engine->numThreads.value();
+        return v > 0 ? v : nextless::defaultAsrThreads();
+    }
+
+    void syncToJsonFiles() {
+        const auto &a = *config_.audio.mutableValue();
+        const auto &e = *config_.engine.mutableValue();
+        const auto &b = *config_.behavior.mutableValue();
+        const auto &p = *config_.punctuation.mutableValue();
+        const auto &c = *config_.cloud.mutableValue();
+
+        std::string nj = nextless::readConfigFile("nextless.json");
+        if (nj.empty()) nj = "{}";
+        bool ch = nextless::patchJson(nj, "", "activation_msec", nextless::jsonNum(b.activationMsec.value()));
+        ch |= nextless::patchJson(nj, "", "notification_timeout", nextless::jsonNum(b.notificationTimeoutMsec.value()));
+        ch |= nextless::patchJson(nj, "", "debounce_count", nextless::jsonNum(b.debounceCount.value()));
+        if (ch) nextless::writeFileAtomic(nextless::configPath("nextless.json"), nj + "\n");
+
+        std::string aj = nextless::readConfigFile("audio.json");
+        if (aj.empty()) aj = "{}";
+        if (nextless::patchJson(aj, "", "denoise", nextless::jsonQuote(a.denoise.value())))
+            nextless::writeFileAtomic(nextless::configPath("audio.json"), aj + "\n");
+
+        std::string adv = nextless::readConfigFile("advanced.json");
+        if (adv.empty()) adv = "{}";
+        std::string threads = nextless::jsonNum(effectiveThreads());
+        std::string timeout = nextless::jsonNum(e.timeoutSec.value());
+        bool ach = false;
+        ach |= nextless::patchJson(adv, "zipformer", "num_threads", threads);
+        ach |= nextless::patchJson(adv, "zipformer", "timeout_sec", timeout);
+        ach |= nextless::patchJson(adv, "fire_red", "num_threads", threads);
+        ach |= nextless::patchJson(adv, "fire_red", "timeout_sec", timeout);
+        if (!a.lufsTarget.value().empty())
+            ach |= nextless::patchJson(adv, "audio", "lufs_target", a.lufsTarget.value());
+        ach |= nextless::patchJson(adv, "audio", "speex_level", nextless::jsonNum(a.speexLevel.value()));
+        if (!a.crestThreshold.value().empty())
+            ach |= nextless::patchJson(adv, "audio", "crest_threshold", a.crestThreshold.value());
+        ach |= nextless::patchJson(adv, "punctuation", "enabled", nextless::jsonBool(p.enabled.value()));
+        ach |= nextless::patchJson(adv, "punctuation", "timeout_sec", nextless::jsonNum(p.timeoutSec.value()));
+        if (!p.modelDir.value().empty())
+            ach |= nextless::patchJson(adv, "punctuation", "model_dir", nextless::jsonQuote(p.modelDir.value()));
+        if (!p.binPath.value().empty())
+            ach |= nextless::patchJson(adv, "punctuation", "bin_path", nextless::jsonQuote(p.binPath.value()));
+        if (!e.zipformerModelDir.value().empty())
+            ach |= nextless::patchJson(adv, "zipformer", "model_dir", nextless::jsonQuote(e.zipformerModelDir.value()));
+        if (!e.zipformerBin.value().empty())
+            ach |= nextless::patchJson(adv, "zipformer", "bin_path", nextless::jsonQuote(e.zipformerBin.value()));
+        if (!e.fireRedModelDir.value().empty())
+            ach |= nextless::patchJson(adv, "fire_red", "model_dir", nextless::jsonQuote(e.fireRedModelDir.value()));
+        if (!e.fireRedBin.value().empty())
+            ach |= nextless::patchJson(adv, "fire_red", "bin_path", nextless::jsonQuote(e.fireRedBin.value()));
+        ach |= nextless::patchJson(adv, "doubao", "poll_interval_msec", nextless::jsonNum(c.doubaoPollIntervalMsec.value()));
+        ach |= nextless::patchJson(adv, "doubao", "max_polls", nextless::jsonNum(c.doubaoMaxPolls.value()));
+        ach |= nextless::patchJson(adv, "doubao", "submit_timeout_sec", nextless::jsonNum(c.doubaoSubmitTimeoutSec.value()));
+        ach |= nextless::patchJson(adv, "doubao", "query_timeout_sec", nextless::jsonNum(c.doubaoQueryTimeoutSec.value()));
+        ach |= nextless::patchJson(adv, "qwen", "timeout_sec", nextless::jsonNum(c.qwenTimeoutSec.value()));
+        if (ach) nextless::writeFileAtomic(nextless::configPath("advanced.json"), adv + "\n");
+
+        std::string dj = nextless::readConfigFile("doubao.json");
+        if (dj.empty()) dj = "{}";
+        bool dch = false;
+        if (!c.doubaoApiKey.value().empty())
+            dch |= nextless::patchJson(dj, "", "api_key", nextless::jsonQuote(c.doubaoApiKey.value()));
+        if (!c.doubaoResourceId.value().empty())
+            dch |= nextless::patchJson(dj, "", "resource_id", nextless::jsonQuote(c.doubaoResourceId.value()));
+        if (dch) {
+            auto path = nextless::configPath("doubao.json");
+            nextless::writeFileAtomic(path, dj + "\n");
+            chmod(path.c_str(), 0600);
+        }
+
+        std::string qj = nextless::readConfigFile("qwen.json");
+        if (qj.empty()) qj = "{}";
+        bool qch = false;
+        if (!c.qwenApiKey.value().empty())
+            qch |= nextless::patchJson(qj, "", "api_key", nextless::jsonQuote(c.qwenApiKey.value()));
+        if (qch) {
+            auto path = nextless::configPath("qwen.json");
+            nextless::writeFileAtomic(path, qj + "\n");
+            chmod(path.c_str(), 0600);
+        }
+    }
+
+    void applyLive() {
+        activationUsec_ = (uint64_t)config_.behavior->activationMsec.value() * 1000;
+        notificationTimeout_ = config_.behavior->notificationTimeoutMsec.value();
+        debounceCount_ = config_.behavior->debounceCount.value();
+        auto &dnList = denoiserList();
+        for (int i = 0; i < (int)dnList.size(); i++)
+            if (dnList[i] == config_.audio->denoise.value()) denoiserIndex_ = i;
+
+        if (!asr_) return;
+        const auto &e = *config_.engine.mutableValue();
+        const auto &c = *config_.cloud.mutableValue();
+        if (asrProviderId_ == "zipformer" || asrProviderId_ == "fire_red") {
+            asr_->setConfig("num_threads", std::to_string(effectiveThreads()));
+            asr_->setConfig("timeout_sec", std::to_string(e.timeoutSec.value()));
+            const std::string &dir = asrProviderId_ == "zipformer"
+                ? e.zipformerModelDir.value() : e.fireRedModelDir.value();
+            const std::string &bin = asrProviderId_ == "zipformer"
+                ? e.zipformerBin.value() : e.fireRedBin.value();
+            if (!dir.empty()) asr_->setConfig("model_dir", dir);
+            if (!bin.empty()) asr_->setConfig("bin_path", bin);
+        } else if (asrProviderId_ == "doubao") {
+            if (!c.doubaoApiKey.value().empty()) asr_->setConfig("api_key", c.doubaoApiKey.value());
+            if (!c.doubaoResourceId.value().empty()) asr_->setConfig("resource_id", c.doubaoResourceId.value());
+            asr_->setConfig("poll_interval_msec", std::to_string(c.doubaoPollIntervalMsec.value()));
+            asr_->setConfig("max_polls", std::to_string(c.doubaoMaxPolls.value()));
+            asr_->setConfig("submit_timeout_sec", std::to_string(c.doubaoSubmitTimeoutSec.value()));
+            asr_->setConfig("query_timeout_sec", std::to_string(c.doubaoQueryTimeoutSec.value()));
+        } else if (asrProviderId_ == "qwen") {
+            if (!c.qwenApiKey.value().empty()) asr_->setConfig("api_key", c.qwenApiKey.value());
+            asr_->setConfig("timeout_sec", std::to_string(c.qwenTimeoutSec.value()));
+        }
+    }
 
     // ---- 触发键判定（可配置，支持纯修饰键）----
     // 修饰键（左/右 Ctrl、Alt、Shift、Super）的 press 事件里 states 已经带上了

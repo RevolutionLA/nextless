@@ -4,6 +4,7 @@
 #include "temp_wav.h"
 
 #include <unistd.h>
+#include <cstdlib>
 #include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
@@ -88,7 +89,15 @@ FireRedAsrProvider::~FireRedAsrProvider() {
 void FireRedAsrProvider::setConfig(const std::string &key,
                                     const std::string &value) {
     if (key == "model_dir") {
-        modelDir_ = value;
+        if (!value.empty()) modelDir_ = value;
+    } else if (key == "bin_path") {
+        if (!value.empty()) sherpaBin_ = value;
+    } else if (key == "num_threads" || key == "timeout_sec") {
+        int v = std::atoi(value.c_str());
+        if (v > 0) {
+            if (key == "num_threads") numThreads_ = v;
+            else timeoutSec_ = v;
+        }
     }
 }
 

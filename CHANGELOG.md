@@ -8,6 +8,18 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- Full settings panel (the "one panel, every option" ask): the fcitx5 add-on
+  configuration now carries grouped options for behavior/timing, denoise +
+  loudness, local engines (threads, timeouts, model dirs, sherpa binaries),
+  punctuation and cloud credentials. Saving normalizes (clamps ints, validates
+  denoiser/provider ids, parses the two float fields), **patches the JSON files
+  in place** via a new `json_patch` writer that preserves any key the panel does
+  not own, and pushes new values into the running provider — every provider's
+  `setConfig` grew the keys its panel fields map to, so changes take effect on
+  the next utterance without restarting fcitx5. Opening the panel seeds from the
+  files (JSON stays the source of truth; hand-edits remain supported). api-key
+  writes chmod the credential files to 0600. New unit test round-trips the
+  patcher through the same extractors the providers use (19 tests).
 - One-command install (finishes the promise behind issue #7): `v*` tags trigger a
   `Release` workflow that rebuilds the `.deb` on Ubuntu 24.04, refuses to publish when
   the tag and `debian/changelog` disagree, and attaches the package plus `sha256sums.txt`
