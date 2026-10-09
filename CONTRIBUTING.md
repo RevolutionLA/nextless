@@ -21,6 +21,10 @@ benchmarks with real numbers.
 
 ```bash
 # Debian / Ubuntu (verified on Ubuntu 26.04)
+# Or stop maintaining a second copy of this list: after cloning, run
+#   sudo apt install -y build-essential git && sudo apt build-dep ./
+# which reads the requirements straight out of debian/control - the file CI and
+# the Release workflow build from too (issue #41).
 sudo apt install -y g++ meson ninja-build git \
   libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
   libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
