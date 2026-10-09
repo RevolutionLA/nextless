@@ -1,3 +1,17 @@
+fcitx5-nextless (0.3.1-1) unstable; urgency=medium
+
+  * Bug-fix release, no new configuration surface:
+      - the capture sweep no longer deletes another session's in-flight WAV in
+        the shared $XDG_RUNTIME_DIR/nextless directory (ownership by pid).
+      - the local punctuator gives up after three consecutive failures instead
+        of costing every utterance the full timeout.
+      - nextless-get-models verifies every archive against a pinned sha256
+        before extracting, and requires the punctuation binary when
+        --punctuation is asked.
+      - install-deb.sh refuses to install an unverifiable .deb.
+
+ -- RevolutionLA <revolutionla@users.noreply.github.com>  Fri, 09 Oct 2026 20:20:00 +0800
+
 fcitx5-nextless (0.3.0-1) unstable; urgency=medium
 
   * Feature release: full add-on config panel (every tunable, apply-on-save,
