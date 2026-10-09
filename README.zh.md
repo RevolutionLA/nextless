@@ -116,12 +116,11 @@ curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/in
 目前只提供 amd64；其他架构自行构建：
 
 ```bash
-sudo apt install -y dpkg-dev debhelper meson ninja-build git \
-  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
-  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+sudo apt install -y build-essential dpkg-dev debhelper git
 git clone https://github.com/RevolutionLA/nextless.git
 cd nextless
-dpkg-buildpackage -us -uc -b
+sudo apt build-dep ./          # 依赖清单以 debian/control 为准，不在 README 里维护第二份
+dpkg-buildpackage -us -uc -b   # 不加 -d，构建前会把这份清单真检查一遍
 sudo apt install ../fcitx5-nextless_*.deb && fcitx5 -r -d
 ```
 

@@ -31,6 +31,17 @@ user-visible change rather than one per commit.
   checksums, both opt-ins, the API-403 redirect fallback (still verified, and still
   refusing when it cannot verify), and non-root. Reverting the digest gate fails the
   suite; it is not an assertion that can silently rot.
+- `debian/control` now declares everything the build actually needs (issue #41).
+  `Fcitx5Module`, `Fcitx5Config` and `Fcitx5Utils` live in `fcitx5-modules-dev`,
+  `libfcitx5config-dev` and `libfcitx5utils-dev` - not in `libfcitx5core-dev`, which
+  was the only one listed; and since `dh_auto_test` runs the suite, `python3` and
+  `bzip2` are build dependencies as well. `apt build-dep`, sbuild and pbuilder all
+  failed at meson configure while CI stayed green, because the CI and Release jobs
+  typed the list out by hand and passed `-d` to skip the dependency check. Both jobs
+  now install the toolchain, resolve the rest with `apt-get build-dep ./`, and build
+  without `-d`, so a dependency added in `meson.build` but not declared in control
+  breaks here exactly the way it breaks a sponsor's build. README/CONTRIBUTING point
+  at `sudo apt build-dep ./` rather than carrying a fourth copy of the list.
 
 ## [0.3.0] - 2026-10-09
 

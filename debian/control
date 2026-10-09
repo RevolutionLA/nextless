@@ -8,11 +8,16 @@ Build-Depends:
  ninja-build,
  pkg-config,
  libfcitx5core-dev,
+ libfcitx5config-dev,
+ libfcitx5utils-dev,
+ fcitx5-modules-dev,
  libpulse-dev,
  libebur128-dev,
  libcurl4-openssl-dev | libcurl4-gnutls-dev | libcurl-dev,
  libspeexdsp-dev,
- libsoxr-dev
+ libsoxr-dev,
+ python3,
+ bzip2
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 

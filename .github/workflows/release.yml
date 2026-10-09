@@ -19,23 +19,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install packaging dependencies
+      - name: Install the packaging toolchain only
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            dpkg-dev debhelper meson ninja-build git pkg-config \
-            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
-            libpulse-dev libebur128-dev libcurl4-openssl-dev \
-            libspeexdsp-dev libsoxr-dev
+            build-essential dpkg-dev debhelper ca-certificates
 
-      - name: Build the package (clean copy, same recipe as CI)
+      - name: Install build dependencies FROM debian/control
+        # Same reason as the CI job (issue #41): a hand-typed list plus `-d` let
+        # an incomplete control file pass. The artefact users install should be
+        # built by the recipe a Debian sponsor would use.
         run: |
           rm -rf /tmp/pkgsrc && mkdir -p /tmp/pkgsrc
           tar -C . --exclude=.git --exclude=build --exclude=obj-\* \
               --exclude=stage-\* --exclude=debian/.debhelper \
               -cf - . | tar -C /tmp/pkgsrc -xf -
           cd /tmp/pkgsrc
-          dpkg-buildpackage -us -uc -b -d -jauto
+          sudo apt-get build-dep -y ./
+
+      - name: Build the package (clean copy, same recipe as CI)
+        run: |
+          cd /tmp/pkgsrc
+          dpkg-buildpackage -us -uc -b -jauto
 
       - name: Refuse to publish on tag/changelog mismatch
         run: |

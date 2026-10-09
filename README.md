@@ -142,12 +142,11 @@ publish looks like, so that path needs an explicit opt-in:
 package themselves:
 
 ```bash
-sudo apt install -y dpkg-dev debhelper meson ninja-build git \
-  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
-  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
+sudo apt install -y build-essential dpkg-dev debhelper git
 git clone https://github.com/RevolutionLA/nextless.git
 cd nextless
-dpkg-buildpackage -us -uc -b
+sudo apt build-dep ./          # the dependency list comes from debian/control, not from this README
+dpkg-buildpackage -us -uc -b   # without -d, so that list is checked before building
 sudo apt install ../fcitx5-nextless_*.deb && fcitx5 -r -d
 ```
 
