@@ -26,7 +26,7 @@ jobs:
         os: [ubuntu-latest]
         buildtype: [debug, release]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -89,7 +89,7 @@ jobs:
     name: .deb installs clean
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the packaging toolchain only
         run: |
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload Meson logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: meson-logs-${{ matrix.os }}-${{ matrix.buildtype }}
           path: build/meson-logs/
@@ -159,7 +159,7 @@ jobs:
     name: opt-in diagnostics still compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         run: |
           sudo apt-get update
