@@ -16,6 +16,14 @@ user-visible change rather than one per commit.
   stderr and to the diagnostics log; raw text keeps flowing either way.
 
 ### Changed
+- Roadmap rows moved with the work (issue #48): the long-term list splits
+  `.deb packaging` (done, #34 + #38) from "an apt repository" and "AUR" (both
+  open, tracked as #35), and ordered-table row 4 now names what landed and what
+  its own finish line still demands - dictation on a clean Ubuntu VM and a
+  rollback paragraph - instead of reading as if nothing had shipped. Both
+  READMEs, same as every previous row. No behaviour changed; the table's "each
+  item shows who fixed it" convention now holds where the most visible
+  milestone lives.
 - `nextless-get-models` no longer installs **both** models (~1.8 GB) just because
   nobody was at the keyboard (issue #45). With no terminal and no `--backend` it
   now stops before touching the network and prints the three explicit choices

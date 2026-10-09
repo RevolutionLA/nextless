@@ -405,7 +405,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 | 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. **Fixed in [#10](https://github.com/RevolutionLA/nextless/pull/10)** — all four providers now delete the WAV *before* the callback (caught intermittently by CI's debug job; local reproduction under `taskset -c 0` is probabilistic, ~5% on the old code). | ✅ CI is green in both build types; the fix is stronger than this finish line — callback-then-cleanup is now illegal, so the assertion stays strict instead of tolerating it |
 | 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. **Fixed in [#11](https://github.com/RevolutionLA/nextless/pull/11)** — meson installs the examples as `*.json` into the build's `sysconfdir`/nextless and compiles the same path into the loader, so install and read cannot drift; CI does a staged install and fails if any packaged example stops landing (six since `hotwords.json`). | ✅ meson ships them — `/etc/nextless` for distro builds (`--sysconfdir=/etc`), `/usr/local/etc/nextless` for a plain source install, the same path the loader reads |
 | 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. **Fixed in [#12](https://github.com/RevolutionLA/nextless/pull/12)** — providers pre-check the runtime and each model file and report the exact path; the panel shows "sherpa-onnx runtime missing" / "offline model missing" with the README pointer (`test_missing_components` drives all four paths against a fake `$HOME`). | ✅ the input panel names the piece and points at the README's download section; the exact path it looked for goes to the fcitx5 log (and feeds the wizard below) |
-| 4 | **Real install and removal path**: `.deb` first (dependency list, model fetch, clean uninstall), AUR after. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
+| 4 | **Real install and removal path**: the `.deb` half is **Fixed in [#34](https://github.com/RevolutionLA/nextless/pull/34)** (packaging, dependency list, install/purge assertions in CI) and **[#38](https://github.com/RevolutionLA/nextless/pull/38)** (published on Releases with `sha256sums.txt`, `tools/install-deb.sh` one-command route, fail-closed digest check in [#51](https://github.com/RevolutionLA/nextless/pull/51)); model fetch is `nextless-get-models` ([#5](https://github.com/RevolutionLA/nextless/issues/5)). Still open here: someone dictating a sentence on a clean Ubuntu VM, and a rollback paragraph. AUR after that. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
 | 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. | one 10 s utterance with the real binary, wall-clock and RTF recorded — or the option is retired |
 | 6 | **Coexistence with the typing-side IME**: document the supported combinations (wetype, fcitx5 pinyin) and the key-collision rules. | a short doc plus one smoke test per combination |
 
@@ -414,7 +414,14 @@ The longer-term list:
 - [x] Local punctuation: integrate `sherpa-onnx-offline-punctuation` (ct-transformer)
 - [x] Hotwords / custom phrases: `~/.config/nextless/hotwords.json` correction table for every backend (per-model biasing still open)
 - [x] First-run wizard that downloads the right sherpa-onnx build (x86_64 / aarch64) — `nextless-get-models`
-- [ ] `.deb` packaging (and `fcitx5-nextless` in the AUR)
+- [x] `.deb` packaging: built in CI, published on GitHub Releases with
+      `sha256sums.txt`, and installed by one command — **Fixed in
+      [#34](https://github.com/RevolutionLA/nextless/pull/34)** (packaging) and
+      **[#38](https://github.com/RevolutionLA/nextless/pull/38)** (publishing +
+      `tools/install-deb.sh`)
+- [ ] An apt repository, so upgrades arrive through `apt upgrade` instead of
+      re-running the installer
+- [ ] `fcitx5-nextless` in the AUR — tracked as [#35](https://github.com/RevolutionLA/nextless/issues/35)
 - [x] A/B benchmark harness publishing CER / latency / RTF / RSS per model
       (`tools/benchmark/` + [docs/benchmarks.md](docs/benchmarks.md); CER rows
       still need verified transcripts — recording one's own corpus is documented)
