@@ -214,12 +214,16 @@ nextless-get-models
 That is the whole step. The helper (installed next to the addon; `tools/get_models.sh`
 in the repo if you want to run it before installing) detects the CPU architecture, shows
 the download size before fetching anything, and lets you pick Zipformer, FireRed, or both
-(`--backend=...` for non-interactive runs). It writes only inside `~/.local/share/nextless/`,
-is safe to re-run — already-installed pieces are skipped — and only moves an archive into
-place after verifying the extracted directory names are the ones `advanced.json` expects,
-so a failed download leaves no half-extracted model behind. `--dry-run` prints the plan
-without touching anything, and `--punctuation` also fetches the optional ~62 MB ct-transformer
-model that gives the local backends ，。？ (an interactive run asks; see [Limitations](#limitations-read-before-you-install)).
+(`--backend=...`; with no terminal it asks for that flag instead of assuming you wanted
+the biggest option). It writes only inside `~/.local/share/nextless/`, is safe to re-run —
+already-installed pieces are skipped — **checks every archive against a pinned sha256
+before extracting it**, and only moves an archive into place after verifying the extracted
+directory names are the ones `advanced.json` expects, so a corrupt or substituted download
+leaves no half-extracted model behind. `--dry-run` prints the plan without touching
+anything, and `--punctuation` also fetches the optional ~62 MB ct-transformer model that
+gives the local backends ，。？ (an interactive run asks; see [Limitations](#limitations-read-before-you-install)) —
+it refuses to proceed if the pinned sherpa-onnx runtime stops shipping the punctuation
+binary, rather than installing a config that silently no-ops.
 
 Manual path, if you would rather do it yourself:
 
