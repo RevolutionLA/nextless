@@ -55,11 +55,37 @@ jobs:
           cd /tmp
           sha256sum fcitx5-nextless_*_amd64.deb > sha256sums.txt
           cat sha256sums.txt
-          notes="Push-to-talk voice input for fcitx5, offline-first. Install: \`curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash\` then \`nextless-get-models --zipformer --punctuation\` and \`fcitx5 -r -d\`. Models are not in the .deb by design."
+          # Release notes come from the CHANGELOG section for this tag. The page is
+          # where a user decides whether to update, and a hard-coded blurb told them
+          # nothing: v0.3.0 and v0.3.1 shipped with byte-identical notes.
+          tag_ver="${GITHUB_REF_NAME#v}"
+          awk -v want="## [$tag_ver]" '
+            index($0, want) == 1 { f = 1; next }
+            f && /^## \[/        { exit }
+            f                   { print }
+          ' /tmp/pkgsrc/CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            # Not fatal - the artefacts and the version gate are the contract - but say
+            # so loudly instead of publishing silence.
+            echo "::warning::CHANGELOG.md has no section for [$tag_ver]; publishing without release notes"
+          fi
+          cat >> notes.md <<'BLURB'
+
+          ## Install / update
+
+          ```
+          curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash
+          ```
+
+          The installer checks the .deb against `sha256sums.txt` below and refuses to install
+          what it cannot verify. Then `nextless-get-models --zipformer --punctuation` (skips
+          what is already there) and `fcitx5 -r -d`. Models are deliberately not in the .deb.
+          BLURB
+          cat notes.md
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             fcitx5-nextless_*_amd64.deb sha256sums.txt \
-            --title "Nextless $GITHUB_REF_NAME" --notes "$notes" \
+            --title "Nextless $GITHUB_REF_NAME" --notes-file notes.md \
             || gh release upload "$GITHUB_REF_NAME" --clobber \
                  --repo "$GITHUB_REPOSITORY" \
                  fcitx5-nextless_*_amd64.deb sha256sums.txt
