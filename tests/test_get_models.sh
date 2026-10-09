@@ -49,6 +49,14 @@ out=$(NEXTLESS_DATA_HOME=/nonexistent bash "$script" --dry-run --backend=zipform
 if grep -q "Punct" <<<"$out"; then fail "punctuation shown without --punctuation"; fi
 
 # --- fake release trees ---------------------------------------------------------
+# The script refuses any archive whose sha256 is not the one it pins (issue #44).
+# These fixtures build archives under the PRODUCTION names, so each one registers
+# its own digest through the same key lookup the script uses - and re-registers it
+# whenever a case deliberately rewrites the bytes.
+sha_key() { printf 'NEXTLESS_SHA256_%s' "$(printf '%s' "$(basename "$1")" | tr -c 'A-Za-z0-9' '_')"; }
+pin() { local k; k="$(sha_key "$1")"; export "$k=$(sha256sum "$1" | awk '{print $1}')"; }
+pin_as() { local k; k="$(sha_key "$2")"; export "$k=$1"; }
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 rel="$tmp/rel" models="$tmp/models"
@@ -58,15 +66,20 @@ rt_top="sherpa-onnx-v${V}-linux-x64-shared"
 mkdir -p "$tmp/stage/$rt_top/bin" "$tmp/stage/$rt_top/lib"
 printf '#!/bin/sh\n' > "$tmp/stage/$rt_top/bin/sherpa-onnx"
 printf '#!/bin/sh\n' > "$tmp/stage/$rt_top/bin/sherpa-onnx-offline"
+# v1.13.8 really does ship this; the fake tree has to match or the punctuation
+# leg below would fail for the wrong reason (issue #44).
+printf '#!/bin/sh\n' > "$tmp/stage/$rt_top/bin/sherpa-onnx-offline-punctuation"
 chmod +x "$tmp/stage/$rt_top/bin/"*
 : > "$tmp/stage/$rt_top/lib/libonnxruntime.so.1.13.1"
 tar -cjf "$rel/$rt_top.tar.bz2" -C "$tmp/stage" "$rt_top"
+pin "$rel/$rt_top.tar.bz2"
 
 mkdir -p "$tmp/stage/$PUNDIR"
 for f in model.int8.onnx tokens.json config.yaml; do
     echo "fake" > "$tmp/stage/$PUNDIR/$f"
 done
 tar -cjf "$models/$PUNDIR.tar.bz2" -C "$tmp/stage" "$PUNDIR"
+pin "$models/$PUNDIR.tar.bz2"
 
 mkdir -p "$tmp/stage/$ZIPDIR"
 for f in encoder-epoch-99-avg-1.onnx decoder-epoch-99-avg-1.onnx \
@@ -74,6 +87,7 @@ for f in encoder-epoch-99-avg-1.onnx decoder-epoch-99-avg-1.onnx \
     echo "fake" > "$tmp/stage/$ZIPDIR/$f"
 done
 tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
+pin "$models/$ZIPDIR.tar.bz2"
 
 export HOME="$tmp/home"
 DATA="$HOME/.local/share/nextless"
@@ -113,6 +127,7 @@ if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "re-run left staging"; f
 
 # --- corrupt download leaves no half-extracted model ---------------------------------
 printf 'not a bzip2 file' > "$models/$FIRDIR.tar.bz2"
+pin "$models/$FIRDIR.tar.bz2"   # honest pin: the mismatch check must not be what fires here
 if run --backend=firered -y > "$tmp/log3" 2>&1; then
     fail "corrupt archive must abort"
 fi
@@ -123,6 +138,7 @@ if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after fail
 # --- unexpected top-level directory is refused ---------------------------------------
 mkdir -p "$tmp/stage/wrong-name" && echo x > "$tmp/stage/wrong-name/tokens.txt"
 tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" wrong-name
+pin "$models/$ZIPDIR.tar.bz2"
 rm -rf "$DATA/models/$ZIPDIR"
 if run --backend=zipformer -y > "$tmp/log4" 2>&1; then
     fail "unexpected dir name must abort"
@@ -131,13 +147,72 @@ grep -qi "other than" "$tmp/log4" || fail "no directory-name error: $(cat "$tmp/
 [ ! -e "$DATA/models/wrong-name" ] || fail "wrong-name dir escaped into models/"
 if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after name failure"; fi
 
+# --- sha256 gate: a mismatch stops before extraction (issue #44) ------------------
+pin_as "$(sha256sum /dev/null | awk '{print $1}')" "$models/$ZIPDIR.tar.bz2"
+if run --backend=zipformer -y > "$tmp/log_mismatch" 2>&1; then
+    fail "a wrong sha256 must abort the install"
+fi
+grep -qi "sha256 MISMATCH" "$tmp/log_mismatch" \
+    || fail "no mismatch message: $(cat "$tmp/log_mismatch")"
+if ls -A "$DATA/models" 2>/dev/null | grep -q "$ZIPDIR"; then
+    fail "a mismatched archive still extracted into models/"
+fi
+if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after mismatch"; fi
+# Restore a *valid* archive under that name (the case above left a wrong-name one)
+# and register its real digest again for the legs below.
+tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
+pin "$models/$ZIPDIR.tar.bz2"
+
+# --- the punctuation binary is part of the runtime contract (issue #44) -----------
+# sherpa-onnx-offline-punctuation is what the punctuator spawns. v1.13.8 ships it,
+# but nothing checked: a bump that drops or renames it would let --punctuation
+# "install successfully" while the post-processing silently no-ops forever.
+rm -rf "$DATA"
+mkdir -p "$tmp/stage_nopunct/$rt_top/bin" "$tmp/stage_nopunct/$rt_top/lib"
+printf '#!/bin/sh\n' > "$tmp/stage_nopunct/$rt_top/bin/sherpa-onnx"
+printf '#!/bin/sh\n' > "$tmp/stage_nopunct/$rt_top/bin/sherpa-onnx-offline"
+chmod +x "$tmp/stage_nopunct/$rt_top/bin/"*
+: > "$tmp/stage_nopunct/$rt_top/lib/libonnxruntime.so.1.13.1"
+mkdir -p "$tmp/rel_nopunct"
+tar -cjf "$tmp/rel_nopunct/$rt_top.tar.bz2" -C "$tmp/stage_nopunct" "$rt_top"
+pin "$tmp/rel_nopunct/$rt_top.tar.bz2"
+
+if NEXTLESS_RELEASE_BASE="file://$tmp/rel_nopunct" NEXTLESS_MODEL_BASE="file://$models" \
+   NEXTLESS_PUNCT_BASE="file://$models" \
+   bash "$script" --backend=zipformer --punctuation -y > "$tmp/log_nopunct" 2>&1; then
+    fail "--punctuation must refuse a runtime with no punctuation binary"
+fi
+grep -q "sherpa-onnx-offline-punctuation" "$tmp/log_nopunct" \
+    || fail "the refusal never names the missing binary: $(cat "$tmp/log_nopunct")"
+[ ! -e "$DATA/models/$PUNDIR" ] || fail "punctuation model installed despite the broken runtime"
+# The two fake runtimes share one asset name, so the pin has to go back to the
+# complete one before the next leg (the key is derived from the filename).
+pin "$rel/$rt_top.tar.bz2"
+
+# ... and an already-installed runtime that predates the binary must not count as
+# ready: runtime_present() alone used to say yes and skip forever.
+rm -rf "$DATA"
+mkdir -p "$DATA/sherpa-onnx/bin" "$DATA/sherpa-onnx/lib"
+printf '#!/bin/sh\n' > "$DATA/sherpa-onnx/bin/sherpa-onnx"
+printf '#!/bin/sh\n' > "$DATA/sherpa-onnx/bin/sherpa-onnx-offline"
+chmod +x "$DATA/sherpa-onnx/bin/"*
+: > "$DATA/sherpa-onnx/lib/libonnxruntime.so.1.13.1"
+run --backend=zipformer --punctuation -y > "$tmp/log_refetch" 2>&1 \
+    || fail "refetch of a punctuation-less runtime failed: $(cat "$tmp/log_refetch")"
+grep -q "runtime: fetching" "$tmp/log_refetch" \
+    || fail "a runtime without the punctuation binary was treated as complete: $(cat "$tmp/log_refetch")"
+[ -x "$DATA/sherpa-onnx/bin/sherpa-onnx-offline-punctuation" ] \
+    || fail "refetch did not bring the punctuation binary"
+
 # --- issue #45: no terminal and no --backend must ask, not download ---------------
 # The two cases above deliberately corrupt the archives; rebuild valid ones so the
 # "both" leg below proves real behaviour rather than a download error.
 tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
+pin "$models/$ZIPDIR.tar.bz2"
 mkdir -p "$tmp/stage/$FIRDIR"
 for f in encoder.int8.onnx decoder.int8.onnx tokens.txt; do echo fake > "$tmp/stage/$FIRDIR/$f"; done
 tar -cjf "$models/$FIRDIR.tar.bz2" -C "$tmp/stage" "$FIRDIR"
+pin "$models/$FIRDIR.tar.bz2"
 
 # `< /dev/null` matters: a developer running this file from a terminal would
 # otherwise land in the interactive picker instead of the branch under test.

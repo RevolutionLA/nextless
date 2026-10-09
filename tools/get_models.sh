@@ -34,6 +34,23 @@ FIRERED_DIR="sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26"
 PUNCT_BASE="${NEXTLESS_PUNCT_BASE:-https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models}"
 PUNCT_DIR="sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8"
 
+# Expected sha256 of each pinned archive (issue #44). They change exactly when
+# VERSION or a model name changes - one line per pin, same maintenance as above.
+# Why it matters: the staging checks below only catch accidents. An asset
+# substituted at the same URL with the same top-directory name would pass them
+# all and then be executed by the add-on.
+#
+# How these were obtained (2026-10-09): streamed each asset from GitHub and
+# hashed it (`curl -L <url> | sha256sum`), rather than copying a number from a
+# page that could itself be the thing under attack. So this catches corruption,
+# a half-replaced publish and a mismatched re-tag - not a targeted compromise of
+# the upstream release.
+SHA_RUNTIME_X64="c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4"
+SHA_RUNTIME_AARCH64="4e3734f82bc1379fd91f219f5869c7e9d03b7a4f7561907d8abca4849c51a789"
+SHA_ZIPFORMER="27ffbd9ee24ad186d99acc2f6354d7992b27bcab490812510665fa8f9389c5f8"
+SHA_FIRERED="43015b3f1643a5688b4821e8ed323473d38b798c4ec291471fe00df1bcfc4f1c"
+SHA_PUNCT="c0d5aa5f8eeb686032345e180bedf39319dc2e0556781c6264bcadba8328a6e1"
+
 DATA_HOME="${NEXTLESS_DATA_HOME:-$HOME/.local/share/nextless}"
 RUNTIME_DIR="$DATA_HOME/sherpa-onnx"
 MODELS_DIR="$DATA_HOME/models"
@@ -118,6 +135,37 @@ RUNTIME_URL="$RELEASE_BASE/$RUNTIME_ASSET"
 zipformer_url="$MODEL_BASE/$ZIPFORMER_DIR.tar.bz2"
 firered_url="$MODEL_BASE/$FIRERED_DIR.tar.bz2"
 punct_url="$PUNCT_BASE/$PUNCT_DIR.tar.bz2"
+
+# Expected digest for one archive filename. A NEXTLESS_SHA256_<name> environment
+# override wins (tests build their own archives under the production names, and
+# the corrupt-download case has to get *past* verification to reach the
+# extraction check); empty means nothing is pinned for that asset.
+asset_sha256() { # $1=archive filename
+    local var="NEXTLESS_SHA256_$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"
+    local override="${!var:-}"
+    if [ -n "$override" ]; then
+        printf '%s' "$override"
+        return
+    fi
+    case "$1" in
+        "sherpa-onnx-v${VERSION}-linux-x64-shared.tar.bz2")          printf '%s' "$SHA_RUNTIME_X64" ;;
+        "sherpa-onnx-v${VERSION}-linux-aarch64-shared-cpu.tar.bz2")  printf '%s' "$SHA_RUNTIME_AARCH64" ;;
+        "${ZIPFORMER_DIR}.tar.bz2")                                  printf '%s' "$SHA_ZIPFORMER" ;;
+        "${FIRERED_DIR}.tar.bz2")                                    printf '%s' "$SHA_FIRERED" ;;
+        "${PUNCT_DIR}.tar.bz2")                                      printf '%s' "$SHA_PUNCT" ;;
+        *)                                                           printf '' ;;
+    esac
+}
+
+# The punctuation feature needs a third binary from the runtime; v1.13.8 ships
+# it, but nothing checked for it, so a version bump that renames or drops it
+# would install "successfully" while the punctuator silently no-ops forever
+# (issue #44).
+PUNCT_BIN_NAME="sherpa-onnx-offline-punctuation"
+
+punct_binary_present() {
+    [ -x "$RUNTIME_DIR/bin/$PUNCT_BIN_NAME" ]
+}
 
 runtime_present() {
     [ -x "$RUNTIME_DIR/bin/sherpa-onnx" ] &&
@@ -280,10 +328,30 @@ fail() {
 
 fetch_and_extract() { # $1=url $2=expected top dir
     local url="$1" expect="$2" archive="$STAGING/$(basename "$1")"
+    local name
+    name="$(basename "$1")"
     # -C - resume is deliberately off: a truncated retry into a tarball we
     # are about to fully extract adds a corruption path for no real gain.
     if ! curl -fL --retry 3 --connect-timeout 10 --progress-bar -o "$archive" "$url"; then
         fail "download failed: $url — check your network, then re-run; already-installed pieces are skipped."
+    fi
+    # Verify before extracting: extracting is where a substituted asset starts
+    # touching disk (issue #44).
+    local want got
+    want="$(asset_sha256 "$name")"
+    got="$(sha256sum "$archive" 2>/dev/null | awk '{print $1}' || true)"
+    if [ -z "$got" ]; then
+        rm -f "$archive"
+        fail "cannot hash $name: no working sha256sum on this system. Refusing to install unverified."
+    fi
+    if [ -z "$want" ]; then
+        rm -f "$archive"
+        fail "no sha256 pinned for $name: this script only installs assets it can name and hash, so a missing pin means the table above is out of date with the URL it fetches. Add the digest (or revert the name change) — nothing extracted."
+    elif [ "$want" != "$got" ]; then
+        rm -f "$archive"
+        fail "sha256 MISMATCH for $name: expected $want, got $got. Corrupt download or a re-published asset; nothing extracted. Re-run once, and if it persists open an issue."
+    else
+        echo "  sha256 verified (${got:0:12}...) for $name"
     fi
     tar -xjf "$archive" -C "$STAGING" || fail "could not extract $archive (corrupt download?)"
     [ -d "$STAGING/$expect" ] || fail "archive extracted a directory other than '$expect'; README paths would not match — aborting."
@@ -291,7 +359,9 @@ fetch_and_extract() { # $1=url $2=expected top dir
 }
 
 install_runtime() {
-    if runtime_present && ! $force; then
+    # --punctuation needs a third binary; skipping on "runtime present" alone
+    # would keep a runtime that cannot punctuate (issue #44).
+    if runtime_present && ! $force && { ! $want_punct || punct_binary_present; }; then
         echo "runtime: already installed, skipping."
         return
     fi
@@ -300,6 +370,12 @@ install_runtime() {
     # bin/ and lib/ both required: the binaries carry rpath $ORIGIN/../lib.
     [ -d "$STAGING/$RUNTIME_TOP/bin" ] && [ -d "$STAGING/$RUNTIME_TOP/lib" ] \
         || fail "runtime archive lacks bin/ or lib/."
+    if $want_punct && [ ! -x "$STAGING/$RUNTIME_TOP/bin/$PUNCT_BIN_NAME" ]; then
+        fail "sherpa-onnx v$VERSION ships no bin/$PUNCT_BIN_NAME, so --punctuation would install 'successfully' and then silently do nothing. Drop --punctuation or pin a runtime that has it."
+    fi
+    if [ ! -x "$STAGING/$RUNTIME_TOP/bin/$PUNCT_BIN_NAME" ] && ! $want_punct; then
+        echo "  note: this runtime has no bin/$PUNCT_BIN_NAME; local punctuation would need --punctuation on a version that ships it." >&2
+    fi
     if $force; then rm -rf "$RUNTIME_DIR"; fi
     mkdir -p "$RUNTIME_DIR"
     cp -a "$STAGING/$RUNTIME_TOP/bin" "$STAGING/$RUNTIME_TOP/lib" "$RUNTIME_DIR/" \

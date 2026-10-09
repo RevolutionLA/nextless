@@ -8,6 +8,15 @@ user-visible change rather than one per commit.
 ## [Unreleased]
 
 ### Added
+- `nextless-get-models` now **verifies every archive before extracting it**
+  (issue #44). The runtime (x86_64 and aarch64), Zipformer, FireRed and the
+  punctuation model each carry a pinned sha256 in the script; a mismatch aborts
+  with nothing moved into place and no staging left behind. The pin list is the
+  same one-line-per-version maintenance the URL pins already are, and the digests
+  were produced by streaming each asset from upstream and hashing it rather than
+  copied from a page. Trust model written into SECURITY.md: these are pins, not
+  signatures - they catch corruption and a substituted asset, not a legitimately
+  re-published upstream.
 - The local punctuator now gives up for the session after **three consecutive
   failures** (issue #47), the same rule DeepFilterNet already follows. Before
   this, a broken, quarantined or hanging `sherpa-onnx-offline-punctuation`
@@ -26,6 +35,16 @@ user-visible change rather than one per commit.
   unaffected.
 
 ### Fixed
+- `--punctuation` can no longer install "successfully" on a runtime that cannot
+  punctuate (issue #44). `runtime_present()` looked for `bin/sherpa-onnx` and
+  `bin/sherpa-onnx-offline` only, so `sherpa-onnx-offline-punctuation` - the
+  binary the punctuator actually spawns - was never checked by the installer or
+  the contract test. A version bump that drops or renames it would have left the
+  post-processing silently no-oping (`skipped_missing_pieces`, log-only) with the
+  model downloaded right next to it. `install_runtime` now asserts the binary is
+  in the freshly extracted runtime when `--punctuation` was asked, refuses loudly
+  if not, and treats an installed runtime without it as *not* ready so the next
+  run re-fetches instead of skipping forever.
 - The startup sweep no longer deletes a **live recording of another session**
   (issue #42). With `XDG_RUNTIME_DIR` set the capture dir is one fixed path
   shared by every process of the user (`/run/user/<uid>/nextless`), and the

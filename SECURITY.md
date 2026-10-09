@@ -31,6 +31,13 @@ GitHub Release, so this is trust-on-first-use. It catches corruption, a partiall
 release, and a mismatched re-tag. It does not protect against an attacker who can already write
 to the release. Pin the digest yourself if that threat applies to you.
 
+`nextless-get-models` is stricter, because it decides what gets executed later: every archive it
+fetches (sherpa-onnx runtime per architecture, Zipformer, FireRed, punctuation) is compared to a
+sha256 pinned in the script **before extraction**, and a mismatch aborts with nothing moved into
+place. Those digests were produced by streaming each asset from upstream and hashing it, not
+copied from a page. They are pins, not signatures: if upstream re-publishes an asset legitimately,
+the check fails loudly and the constant is updated in a commit you can review.
+
 ## Reporting a vulnerability
 
 Use [GitHub Security Advisories](https://github.com/RevolutionLA/nextless/security/advisories/new)
