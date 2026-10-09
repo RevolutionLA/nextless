@@ -7,6 +7,14 @@ user-visible change rather than one per commit.
 
 ## [Unreleased]
 
+### Added
+- The local punctuator now gives up for the session after **three consecutive
+  failures** (issue #47), the same rule DeepFilterNet already follows. Before
+  this, a broken, quarantined or hanging `sherpa-onnx-offline-punctuation`
+  cost every single utterance the full `timeout_sec` (0.2 s healthy vs 5 s
+  broken) with nothing in the panel to reveal why. The trip is logged once to
+  stderr and to the diagnostics log; raw text keeps flowing either way.
+
 ### Changed
 - `nextless-get-models` no longer installs **both** models (~1.8 GB) just because
   nobody was at the keyboard (issue #45). With no terminal and no `--backend` it
@@ -52,6 +60,16 @@ user-visible change rather than one per commit.
   without `-d`, so a dependency added in `meson.build` but not declared in control
   breaks here exactly the way it breaks a sponsor's build. README/CONTRIBUTING point
   at `sudo apt build-dep ./` rather than carrying a fourth copy of the list.
+- `tests/test_punctuator.cpp` now proves the timeout path really kills the
+  process group (issue #47). It only asserted "timed out, raw text kept", so
+  deleting `kill(-pid, SIGKILL)` left the suite green while production leaked a
+  process per utterance. The fake binary now ignores SIGTERM - ignored
+  dispositions survive fork+exec, so only the escalation can clear it - records
+  its grandchild's pid, and the test checks that pid is gone from /proc *and*
+  that `runPunctuation` came back in time instead of waiting the child out.
+  Both mutations were run: dropping the SIGKILL and signalling the leader
+  instead of the group each fail the suite now. A final case drives three
+  consecutive failures and asserts the punctuator stays disabled and cheap.
 
 ## [0.3.0] - 2026-10-09
 

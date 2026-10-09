@@ -77,7 +77,7 @@ test('denoise_fallback', test_denoise_fallback, timeout: 30)
 test('missing_components', test_missing_components)
 test('audio_config_loader', test_audio_config_loader)
 test('capture_dir_sweep', test_capture_dir_sweep, timeout: 30)
-test('punctuator', test_punctuator, timeout: 30)
+test('punctuator', test_punctuator, timeout: 60)
 test('hotwords', test_hotwords, timeout: 30)
 
 # Issue #5: get_models.sh contract test — arch/asset-name mapping, install

@@ -46,6 +46,11 @@ bool needsPunctuation(const std::string &providerId) {
     return providerId == "zipformer" || providerId == "fire_red";
 }
 
+// 连续失败多少次就放弃本会话。和 DeepFilter 的 kDfMaxConsecutiveFailures 同
+// 一个数、同一套语义：坏掉的标点二进制不会自己变好，却能让之后的每一句话都
+// 白等满 timeout_sec（健康路径 0.2 s，坏路径 5 s —— 差 25 倍且没有面板可读）。
+constexpr int kPunctMaxConsecutiveFailures = 3;
+
 } // namespace
 
 bool runPunctuation(const std::string &binPath, const std::string &modelPath,
@@ -179,6 +184,11 @@ void punctuateLocalText(std::string &text, const std::string &providerId) {
     }
     if (!enabled) return;
 
+    // 只在识别线程调用（见 punctuator.h），所以会话状态用函数内静态即可。
+    static int consecutiveFailures = 0;
+    static bool disabledForSession = false;
+    if (disabledForSession) return;
+
     const std::string bin = expandTilde(binPath);
     const std::string dir = expandTilde(modelDir);
     // int8 是推荐下载(62 MB), 也接受 fp32 目录(266 MB)——按存在的来。
@@ -197,10 +207,24 @@ void punctuateLocalText(std::string &text, const std::string &providerId) {
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - t0).count();
         fprintf(stderr, "Nextless Punctuator: kept raw text after %ldms\n", ms);
+        ++consecutiveFailures;
         diagnosticLog().event("punctuator", "failed_kept_raw",
-                              {{"elapsed_ms", std::to_string(ms)}});
+                              {{"elapsed_ms", std::to_string(ms)},
+                               {"consecutive_failures",
+                                std::to_string(consecutiveFailures)}});
+        if (consecutiveFailures >= kPunctMaxConsecutiveFailures) {
+            disabledForSession = true;
+            fprintf(stderr, "Nextless Punctuator: %d consecutive failures, giving up "
+                            "for this session (raw text from now on; restart fcitx5 "
+                            "to retry, or set punctuation.enabled=false)\n",
+                    consecutiveFailures);
+            diagnosticLog().event("punctuator", "disabled_for_session",
+                                  {{"consecutive_failures",
+                                    std::to_string(consecutiveFailures)}});
+        }
         return;
     }
+    consecutiveFailures = 0;
     text = std::move(punctuated);
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - t0).count();
