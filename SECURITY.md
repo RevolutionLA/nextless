@@ -18,13 +18,26 @@ document states what we consider a security problem here and how to report it.
 `/dev/uinput` is used in exactly one situation: when the trigger key is a locking key such as
 CapsLock, to undo the lock toggle. Bind any other key and no virtual device is created at all.
 
+## Installation integrity
+
+`tools/install-deb.sh` compares the downloaded `.deb` with the `sha256sums.txt` published next
+to it and **refuses to install when it cannot verify** — the digest file unreachable, or this
+asset missing from it, is what a tampered or sloppily re-published release looks like. The
+escape hatch (`--allow-unverified` / `ALLOW_UNVERIFIED=1`) is deliberately something you have to
+type, because it trades that check for convenience.
+
+Be honest about what the check does buy: both the artefact and its checksums come from the same
+GitHub Release, so this is trust-on-first-use. It catches corruption, a partially replaced
+release, and a mismatched re-tag. It does not protect against an attacker who can already write
+to the release. Pin the digest yourself if that threat applies to you.
+
 ## Reporting a vulnerability
 
 Use [GitHub Security Advisories](https://github.com/RevolutionLA/nextless/security/advisories/new)
 — private, and the right channel. Please do not open a public issue.
 
 I aim to reply within 7 days and ship a fix or a mitigation within 30. Reportedly affected
-versions: `0.2.0` and everything before it, including upstream `vinput`.
+versions: `0.3.0` and everything before it, including upstream `vinput`.
 
 Not valid on its own: an open port, a missing HTTP header, a dependency advisory without an
 exploitable path through this add-on, or "the cloud backend sends my audio to a cloud backend".
