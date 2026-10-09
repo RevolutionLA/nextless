@@ -99,6 +99,9 @@ clipboard round-trip, no focus stealing.
   44-character utterance on an i7-1260P, on the recognition thread, never the
   keypress path. If the model is missing or the punctuation run fails, the raw
   text is committed instead: the decoration step can never eat an utterance.
+  A binary that fails three times in a row is dropped for the rest of the
+  session (same rule as DeepFilterNet), so a broken or quarantined model costs
+  one slow sentence, not five seconds per sentence forever.
   Doubao still has richer punctuation plus ITN and its own server-side hotwords
   (different from the local `hotwords.json` correction table, which every
   backend goes through).

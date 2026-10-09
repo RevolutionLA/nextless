@@ -9,6 +9,8 @@ namespace nextless {
 // 云后端的 providerId 原样返回 —— 它们自己带标点, 这里必须是 no-op。
 // 任何失败(缺模型、子进程报错、超时、输出为空)都保留原文:
 // 标点只是装饰, 永远不能让它吃掉一句话 (issue #4)。
+// 连续 3 次失败后本会话不再尝试(和 DeepFilter 同一套语义, issue #47)——
+// 否则坏掉的二进制会让每句话都白等 timeout_sec。
 // 实测(本机, int8): spawn + 模型加载 + 推理 ≈ 0.2 s, 远低于 ASR 本身,
 // 所以默认常开, 不做 per-backend 开关; advanced.json [punctuation]
 // {"enabled": false} 可整体关掉。必须在识别线程调用, 不在按键回调里。
