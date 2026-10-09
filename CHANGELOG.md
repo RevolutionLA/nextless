@@ -5,7 +5,7 @@ All notable changes to Nextless are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and this project keeps one line per
 user-visible change rather than one per commit.
 
-## [Unreleased]
+## [0.3.1] - 2026-10-09
 
 ### Added
 - `nextless-get-models` now **verifies every archive before extracting it**
