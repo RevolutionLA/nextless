@@ -131,4 +131,30 @@ grep -qi "other than" "$tmp/log4" || fail "no directory-name error: $(cat "$tmp/
 [ ! -e "$DATA/models/wrong-name" ] || fail "wrong-name dir escaped into models/"
 if ls -A "$DATA" | grep -q ".get-models-tmp"; then fail "staging left after name failure"; fi
 
+# --- issue #45: no terminal and no --backend must ask, not download ---------------
+# The two cases above deliberately corrupt the archives; rebuild valid ones so the
+# "both" leg below proves real behaviour rather than a download error.
+tar -cjf "$models/$ZIPDIR.tar.bz2" -C "$tmp/stage" "$ZIPDIR"
+mkdir -p "$tmp/stage/$FIRDIR"
+for f in encoder.int8.onnx decoder.int8.onnx tokens.txt; do echo fake > "$tmp/stage/$FIRDIR/$f"; done
+tar -cjf "$models/$FIRDIR.tar.bz2" -C "$tmp/stage" "$FIRDIR"
+
+# `< /dev/null` matters: a developer running this file from a terminal would
+# otherwise land in the interactive picker instead of the branch under test.
+rm -rf "$DATA"
+if run < /dev/null > "$tmp/log7" 2>&1; then
+    fail "no-terminal + no --backend must stop instead of quietly taking both (~1.8 GB)"
+fi
+grep -qi "no --backend" "$tmp/log7" || fail "refusal should name the flag: $(cat "$tmp/log7")"
+if [ -e "$DATA/models/$ZIPDIR" ] || [ -e "$DATA/models/$FIRDIR" ]; then
+    fail "it fetched models nobody consented to"
+fi
+
+# -y is the scripted opt-in: same call, no terminal, now it goes all the way.
+if ! run -y < /dev/null > "$tmp/log8" 2>&1; then
+    fail "-y should be enough to install both without a terminal: $(cat "$tmp/log8")"
+fi
+[ -e "$DATA/models/$ZIPDIR/tokens.txt" ] || fail "-y path skipped Zipformer"
+[ -e "$DATA/models/$FIRDIR/tokens.txt" ] || fail "-y path skipped FireRed"
+
 echo "get_models.sh: all checks passed"
