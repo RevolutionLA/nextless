@@ -1,5 +1,47 @@
 # Nextless 开发发现记录
 
+## 2026-10-09
+
+### 第四轮评审债（#41-#48）里可复用的几条
+
+- **`set -euo pipefail` 会让脚本的错误信息变成死代码。** 形如 `x=$(grep … file | awk …)` 的赋值，
+  在 grep 没匹配到的时候（exit 1 + pipefail）直接把整个脚本带走，后面那句精心写的
+  `echo "找不到 X"` 永远执行不到。`tools/install-deb.sh` 里四条提示语（"could not resolve
+  latest release" / "no ${ARCH} .deb asset" / 两条摘要分支）全是这个状态；旧代码里
+  "asset not listed 就 WARNING 后继续装" 那条根本从没打印过。复现只要一行：
+  `bash -c 'set -euo pipefail; v=$(grep nope /etc/hostname | awk "{print \$1}"); echo reached'`。
+  修法是在赋值末尾加 `|| true`，而不是把 `set -e` 关掉。
+- **断言必须用变异检验，否则你只是在给自己发绿灯。** 标点超时用例第一版只检查"子进程已从 /proc
+  消失"，而把生产代码的 `kill(-pid, SIGKILL)` 删掉后测试仍然绿：`waitpid` 会一路阻塞到那个
+  30 秒的孩子自然老死，检查时进程当然没了。加上"必须在 5 秒内返回"的时长断言才咬得住；
+  两条合起来才分别覆盖"没升级到 SIGKILL"和"只杀了组长、漏了进程组"。同类：`#42` 的清扫夹具原本
+  用写死的 `9999` 当 pid，而它在任何机器上都是死 pid——归属规则一改，夹具自己红了，说明旧测试
+  一直靠"守卫只看时间"这个错误前提成立。
+- **`apt-get build-dep <本地目录>` 不需要开 `deb-src`**（apt ≥ 1.6，ubuntu-24.04 runner 上
+  `Note, using directory './' to get the build dependencies` 实测有效）。CI 和 Release workflow
+  原本"手抄一份包名清单 + `dpkg-buildpackage -d`"，`-d` 恰好跳过依赖检查，于是
+  `debian/control` 少写三个 fcitx5 开发包在绿灯里完全不可见，而 `apt build-dep`/sbuild/pbuilder
+  第一步就挂。现在两个 job 都只装工具链，其余从 control 解析，且不带 `-d`。
+- **摘要固化的取值方式决定它值不值得信。** `get_models.sh` 五个 sha256 是流式
+  `curl -L <url> | sha256sum` 自己算的（一次性约 1.47 GB），不是从某个页面抄的——抄来的数字和
+  那个页面一样可能被攻击。两个脚本因此故意不对称：`install-deb.sh` 的资产清单来自远端 API，
+  "清单里没这个包"是用户真会撞到的状态，所以给它 `--allow-unverified` 显式逃生门；
+  `get_models.sh` 的五个名字全是自己钉死的，查不到 pin 只可能是开发者忘了加，那就该硬失败，
+  不该留一面绕过自己契约的旗。
+- **`sha256sum -c` 校验不了被改名的文件。** installer 把资产存成 `install.deb`，而 `-c` 会按清单里
+  的文件名去找，必然失败；正确做法是取清单中对应发布文件名的那一行，直接比对摘要。
+- **`debian/changelog` 两条机械规则**：星期必须与真实日期一致（dpkg 会校验，写错直接构建失败）；
+  条目之间要**恰好一个空行**（dpkg 忍了，Debian policy 和 lintian/sbuild 不忍——0.3.0 那次就漏了，
+  0.3.1 顺手补上）。
+
+### 操作纪律（今天两次自伤，写下来是因为代价是本机数据）
+
+- 给 `gh issue comment` / `gh pr create` 传正文一律 `--body-file` + `<<'EOF'` 引号 heredoc。
+  用双引号内联时，正文里反引号包住的 `` `dpkg-buildpackage` ``、`` `apt-get build-dep -y ./` ``
+  会被 shell 当命令替换**真的执行**（当天确实跑起来了 apt、dh_auto_test 和两份测试脚本）。
+- 未提交的改动不要指望穿越 `git reset --hard`：跨分支搬运在写的改动只用
+  `git checkout -b <new> <base>`，破坏性 git 命令前必须先 `git status`。
+
 ## 2026-10-05
 
 ### 默认配置的安装与读取同源（审查清单第 2 项）
