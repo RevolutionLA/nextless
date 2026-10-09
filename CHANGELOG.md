@@ -26,6 +26,30 @@ user-visible change rather than one per commit.
   unaffected.
 
 ### Fixed
+- The startup sweep no longer deletes a **live recording of another session**
+  (issue #42). With `XDG_RUNTIME_DIR` set the capture dir is one fixed path
+  shared by every process of the user (`/run/user/<uid>/nextless`), and the
+  constructor swept it unconditionally - so a restart race, two graphical
+  sessions, or a developer running the test suite while dictating could delete
+  the WAV another session was still writing, which surfaced to that user as
+  "failed to read WAV". Ownership now comes from the pid already in the file
+  name (`nextless_cap_<pid>_<n>.wav`): alive owner = hands off, dead owner =
+  crash residue, collected immediately. The 10-minute age guard stays as the
+  fallback for names without a parseable pid and for reused pids, and one rule
+  now governs both the current dir and the `/tmp` siblings (they had diverged:
+  the unpredictable fallback dirs were guarded, the shared fixed-name one - the
+  only place concurrency can actually happen - was not).
+- `tests/test_capture_dir_sweep.cpp` covers the shared-dir case for real (issue
+  #42). It could not: it forced the `/tmp` fallback branch only, and its
+  fixtures carried a hard-coded pid 9999 that is a dead pid on any machine. The
+  file name's pid is now load-bearing in the test - the suite forks a stand-in
+  "other session" and a provably-dead one - and the XDG branch runs in exec'd
+  phases (both the capture dir and the sweep are once-per-process), asserting
+  five outcomes: live owner kept, dead owner collected, unparseable fresh kept,
+  unparseable ancient collected, and an alive owner's ancient file still
+  collected. Both directions were mutation-tested: sweeping unconditionally
+  fails the live-session checks, never sweeping the current dir fails the
+  owner-died phase.
 - `tools/install-deb.sh` now **fails closed when it cannot verify the digest**
   (issue #43). Previously a missing `sha256sums.txt` or an asset not listed in it
   printed a warning and installed anyway; both are exactly what a tampered or
