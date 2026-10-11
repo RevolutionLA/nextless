@@ -278,9 +278,10 @@ dependency, because it is a separate Rust binary carrying its own model:
 
 ```bash
 mkdir -p ~/.local/share/nextless/bin
-# whatever works for you: the release asset, or `pip install deepfilternet`
-# (the x86_64 musl asset is a bare 36 MB binary with the model compiled in —
-# no tarball, and `deep-filter --version` prints deep_filter 0.5.6)
+# whichever you have: a `pip install deepfilternet` binary on PATH, or the
+# release asset - the x86_64 musl one is a single 36 MB static binary with the
+# model compiled in (no tarball; `deep-filter --version` prints deep_filter 0.5.6),
+# so `chmod +x` it and symlink that path directly instead of using command -v.
 ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
 ```
 

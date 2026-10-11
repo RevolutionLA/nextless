@@ -8,6 +8,11 @@
 // Corpus format: <dir>/manifest.tsv with lines "<relpath>.wav\treference",
 // or a bare directory of *.wav files each paired with a same-stem .txt.
 // Every WAV must be 16 kHz mono PCM16 (what record_corpus.sh produces).
+//
+// Exit codes: 0 measured, 1 bad invocation, 2 corpus/provider unavailable on
+// this box, 3 --denoise mode where no utterance was denoised at all (the rows
+// still say why). run_bench.sh treats them all as non-fatal and lets the table
+// speak, since "not installed here" is a legitimate benchmark answer.
 
 #include "asr_provider.h"
 #include "audio_capture.h"

@@ -247,9 +247,10 @@ speexdsp 随构建一起装好，安静环境够用。环境吵就把 DeepFilter
 
 ```bash
 mkdir -p ~/.local/share/nextless/bin
-# 发行版 asset、或者 pip install deepfilternet，任选
-# （x86_64 musl 那个 asset 就是单个 36 MB 裸二进制，模型已编译进去，没有 tar 包；
-#   `deep-filter --version` 输出 deep_filter 0.5.6）
+# 两种都行：pip install deepfilternet 装到 PATH 上的二进制，或者 release asset。
+# x86_64 musl 那个 asset 就是单个 36 MB 静态二进制（模型已编译进去，没有 tar 包，
+# `deep-filter --version` 输出 deep_filter 0.5.6）—— 用它就 chmod +x 后直接把路径
+# symlink 过去，别用 command -v。
 ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
 ```
 
