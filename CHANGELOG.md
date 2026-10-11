@@ -30,6 +30,28 @@ user-visible change rather than one per commit.
   mutation-checked.
 
 ### Fixed
+- **`denoise: deepfilter` no longer eats the end of your sentence** (issue #61).
+  Both legs of the 16 kHz → 48 kHz → 16 kHz round trip called `soxr_process()`
+  exactly once, and a polyphase resampler holds its group delay (1024 output
+  samples on the up leg, 341 on the down leg) in an internal buffer until it is
+  told the input has ended - which soxr does **not** read from `ilen = 0`, only
+  from `in == NULL`. So every denoised utterance came back shorter than it went
+  in: 830 samples of 16000 on a tone through a length-preserving stub, 69-97 ms
+  on real speech. deep-filter's own framing then drops a further constant 30 ms,
+  which a burst probe shows is truncation rather than delay (lag 0, correlation
+  0.983) - so the end of the last word was the part being lost, on a pipeline
+  whose VAD step deliberately keeps only 20 ms of trailing audio. Both legs are
+  now drained, which by itself took the tone round trip from 15170 back to an
+  exact 16000; the model's own 30 ms is then appended back from the raw input, so
+  `dfDenoise()` preserves the buffer length exactly (0 samples lost across the
+  benchmark corpus) and the last 30 ms is un-denoised instead of missing. Timing
+  is unchanged within measurement noise - three runs of this corpus before and
+  after spanned RTF 0.131-0.163, and the docs now say so instead of quoting one
+  number. A response that comes back more than 160 ms short is rejected as a
+  failure (fallback to speexdsp) rather than padded into a half-denoised buffer,
+  and no failure path may mutate the caller's audio on the way out.
+  `tests/test_denoise_fallback.cpp` pins all of it against stubs, including the
+  exact sample index where denoised audio hands over to the restored raw tail.
 - `docs/benchmarks.md` linked its own artifacts as `docs/<file>` while they live
   in `docs/benchmarks/`, so every "prove the number" link 404'd (issue #23's
   family of anchor drift). Both rows now resolve.

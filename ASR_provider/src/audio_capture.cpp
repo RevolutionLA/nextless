@@ -656,6 +656,10 @@ namespace {
 // 绝不能让一次录音挂在子进程上, 更不能让音频静默绕过降噪。
 constexpr int kDfTimeoutMs = 5000;
 constexpr int kDfMaxConsecutiveFailures = 3;
+// deep-filter 固定少交 30 ms（1440 个 48k 采样），这是已知的模型 framing 开销，
+// 补回原样尾巴就行。缺口大到超过 160 ms 就不是「少给一点」而是结果不完整，
+// 那种情况退回 speexdsp，不拿半截降噪结果上屏。
+constexpr size_t kDfMaxTailRestore = 2560;  // 160 ms at 16 kHz
 
 // 打包者/发行版可以用 NEXTLESS_DEEP_FILTER 指向系统里的 deep-filter,
 // 否则用随包安装在 ~/.local/share/nextless/bin 的那一份。
@@ -672,6 +676,41 @@ std::string dfTempDir() {
     const char *xdg = getenv("XDG_RUNTIME_DIR");
     if (xdg && *xdg && access(xdg, W_OK) == 0) return std::string(xdg);
     return "/tmp";
+}
+
+// soxr_process() 一次只交出它此刻算得出的采样：HQ 的多相滤波器把群延迟（16k→48k
+// 是 1024 个输出采样，48k→16k 是 341 个）留在内部缓冲区，结尾那段只有把「输入结束」
+// 告诉它才会被吐出来 —— 而 soxr 表示 EOS 的方式是 **传 in = NULL**，ilen=0 不算
+// （头文件里写的）。两段以前都只调一次：单看上行少 1024 个 48k 采样，整条往返实测
+// 16000 进 15170 出（少 830 个 ≈ 52 ms），而且两端 click 探针显示输出与输入完全对齐
+// —— 缺的就是最后一个字的尾巴，不是静音（issue #61）。
+// 上采样/下采样共用这里，flush 有硬上限不会打转。
+bool resampleFully(double inRate, double outRate, const std::vector<float> &in,
+                   std::vector<float> &out) {
+    soxr_error_t err;
+    soxr_t resampler = soxr_create(inRate, outRate, 1, &err, nullptr, nullptr, nullptr);
+    if (err) return false;
+    struct Deleter {
+        soxr_t s;
+        ~Deleter() { soxr_delete(s); }
+    } closer{resampler};
+
+    const size_t capacity = (size_t)(in.size() * (outRate / inRate)) + 8192;
+    out.assign(capacity, 0.0f);
+    size_t consumed = 0, generated = 0;
+    err = soxr_process(resampler, in.data(), in.size(), &consumed,
+                       out.data(), capacity, &generated);
+    if (err) return false;
+    size_t produced = generated;
+    for (int i = 0; i < 32 && produced < capacity; ++i) {
+        // in = NULL 才是「没有更多输入了」，把缓冲区里的最后一段交出来
+        err = soxr_process(resampler, nullptr, 0, &consumed,
+                           out.data() + produced, capacity - produced, &generated);
+        if (err || generated == 0) break;
+        produced += generated;
+    }
+    out.resize(produced);
+    return produced > 0;
 }
 
 uint64_t fnv1a(const void *data, size_t len) {
@@ -807,25 +846,17 @@ bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
 
     // Resample 16kHz → 48kHz
     size_t inLen = samples.size();
-    double ratio = 48000.0 / 16000.0;
-    size_t outLen48k = (size_t)(inLen * ratio) + 64;
-
+    // 结尾补原样用的尾巴（见函数末尾）：只可能缺 kDfMaxTailRestore 个，就只留这么多
+    const size_t tailLen = std::min(inLen, kDfMaxTailRestore);
+    std::vector<int16_t> originalTail(samples.end() - tailLen, samples.end());
     std::vector<float> fin(inLen);
     for (size_t i = 0; i < inLen; i++) fin[i] = samples[i] / 32768.0f;
 
-    std::vector<float> fout(outLen48k);
-    soxr_error_t err;
-    soxr_t resampler = soxr_create(16000, 48000, 1, &err, nullptr, nullptr, nullptr);
-    if (err) return giveUp("soxr create error");
+    std::vector<float> fout;
+    if (!resampleFully(16000.0, 48000.0, fin, fout)) return giveUp("soxr upsample error");
 
-    size_t consumed, generated;
-    err = soxr_process(resampler, fin.data(), fin.size(), &consumed,
-                       fout.data(), fout.size(), &generated);
-    soxr_delete(resampler);
-    if (err) return giveUp("soxr process error");
-
-    std::vector<int16_t> samples48k(generated);
-    for (size_t i = 0; i < generated; i++)
+    std::vector<int16_t> samples48k(fout.size());
+    for (size_t i = 0; i < fout.size(); i++)
         samples48k[i] = (int16_t)std::clamp((int)(fout[i] * 32768.0f), -32768, 32767);
 
     // 每次调用一个独立临时文件: 并发录音不会互相覆盖
@@ -903,25 +934,36 @@ bool AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     std::vector<float> fIn(denoised.size());
     for (size_t i = 0; i < denoised.size(); i++) fIn[i] = denoised[i] / 32768.0f;
 
-    size_t outLen16k = (size_t)(fIn.size() * 16000.0 / denoisedRate) + 64;
-    std::vector<float> f16k(outLen16k);
+    std::vector<float> f16k;
+    if (!resampleFully(static_cast<double>(denoisedRate), 16000.0, fIn, f16k))
+        return giveUp("soxr downsample error");
 
-    resampler = soxr_create(denoisedRate, 16000, 1, &err, nullptr, nullptr, nullptr);
-    if (!err) {
-        err = soxr_process(resampler, fIn.data(), fIn.size(), &consumed,
-                           f16k.data(), f16k.size(), &generated);
-        soxr_delete(resampler);
+    // 结果先攒在本地：giveUp 的每条路都必须把调用方的缓冲区原样交还，
+    // 由 applyDenoise 退回 speexdsp 处理完整音频，绝不能留下半截重采样结果。
+    std::vector<int16_t> result(f16k.size());
+    for (size_t i = 0; i < f16k.size(); i++)
+        result[i] = (int16_t)std::clamp((int)(f16k[i] * 32768.0f), -32768, 32767);
+
+    // deep-filter 会砍掉结尾：实测每个文件都正好少 1440 个 48k 采样（30 ms），而且
+    // 与输入零时移（click/相关探针 lag=0、corr=0.983）—— 就是纯截尾，不是延迟。
+    // 松手那一刻用户往往还在发声，所以把这 30 ms 用**原样**采样补回来：只让最后 30 ms
+    // 没降噪，换一个「dfDenoise 不改变音频长度」的硬不变量，最后一个字不会被吃掉。
+    // 缺口超过 kDfMaxTailRestore 就不是模型 framing 而是结果不完整，按失败退回
+    // speexdsp，而不是交出一份半降噪的音频。
+    size_t restored = 0;
+    if (result.size() < inLen) {
+        restored = inLen - result.size();
+        if (restored > kDfMaxTailRestore) return giveUp("processed audio is incomplete");
+        result.insert(result.end(), originalTail.end() - restored, originalTail.end());
+    } else if (result.size() > inLen) {
+        result.resize(inLen);
     }
-    if (err) return giveUp("soxr downsample error");
-
-    samples.resize(generated);
-    for (size_t i = 0; i < generated; i++)
-        samples[i] = (int16_t)std::clamp((int)(f16k[i] * 32768.0f), -32768, 32767);
+    samples.swap(result);
 
     auto t1 = std::chrono::steady_clock::now();
-    fprintf(stderr, "Nextless Capture [timer] df_denoise=%ldms samples=%zu\n",
+    fprintf(stderr, "Nextless Capture [timer] df_denoise=%ldms samples=%zu restored=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
-            samples.size());
+            samples.size(), restored);
     return true;
 }
 

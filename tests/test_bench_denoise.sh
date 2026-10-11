@@ -89,16 +89,14 @@ run "$tmp/good.jsonl" NEXTLESS_DEEP_FILTER="$tmp/changes.sh"
 if field "$tmp/good.jsonl" '",".join(r)' 0 | grep -q error; then
     fail "a measured row must not carry an error field"
 fi
-# dfDenoise resamples 16k->48k->16k. Two things can go wrong and both are
-# pinned: a scale error (audio left at 48 kHz would be 3x this length), and a
-# growing silent truncation. The round trip is known to lose a fixed resampler
-# latency - measured 2026-10-11 at 644-1017 samples (~40-64 ms) regardless of
-# utterance length - so the deficit is bounded in samples, not hidden in a
-# percentage that a 4 s utterance would make look generous.
+# dfDenoise resamples 16k->48k->16k and guarantees the buffer comes back the same
+# length it went in (issue #61: both legs used to drop their resampler tail, 830
+# samples of 6400, and deep-filter's own 30 ms was then truncated off too). The
+# stub preserves the file length, so the row must be exactly the input length -
+# 3x would mean the audio never came back down to 16 kHz.
 got=$(field "$tmp/good.jsonl" 'r["samples_out"]' 0)
-[ "$got" -ge $((6400 * 3 / 4)) ] && [ "$got" -le $((6400 * 105 / 100)) ] ||
-    fail "samples_out=$got is not within 75-105% of the 6400 input samples"
-[ $((6400 - got)) -le 1200 ] || fail "resample round trip lost $((6400 - got)) samples (> 75 ms)"
+[ "$got" = "6400" ] || fail "samples_out=$got != the 6400 input samples (length-preserving invariant broken)"
+[ "$(field "$tmp/good.jsonl" 'r["wall_ms"] > 0' 0)" = "True" ] || fail "a real spawn measured 0 ms"
 [ "$(field "$tmp/good.jsonl" 'r["wall_ms"] > 0' 0)" = "True" ] || fail "a real spawn measured 0 ms"
 [ "$(field "$tmp/good.jsonl" 's["failures"]' 0)" = "0" ] || fail "summary counted failures for a clean run"
 grep -q 'df_denoise=' "$tmp/good.jsonl.err" || fail "stderr lost the df_denoise timing line"
