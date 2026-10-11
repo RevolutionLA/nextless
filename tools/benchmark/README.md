@@ -34,6 +34,18 @@ meson compile -C build
 BACKENDS="zipformer firered" tools/benchmark/run_bench.sh ~/nextless-corpus
 ```
 
+`deepfilter` is not an ASR backend but it is benchmarkable the same way:
+`BACKENDS="deepfilter" run_bench.sh DIR` calls `bench_asr --denoise`, which runs
+`AudioCapture::dfDenoise()` once per file — the real path, so the resample, the
+per-utterance process spawn, the 5 s deadline and the speexdsp fallback are all
+inside the number. The row has no CER/WER (it is a denoiser, it emits no text),
+and `machine.txt` records which `deep-filter` answered (`--version`, or
+"not installed" plus the path it tried). Use `HOST_LABEL=…` to publish a machine
+name; the hostname is redacted by default because these files get committed.
+
+`tests/test_bench_denoise.sh` pins that a denoiser which silently did nothing is
+reported as a failure rather than as a fast timing number.
+
 Cloud backends (`doubao`, `qwen`) run through the same harness but need your
 `~/.config/nextless/*.json` keys and count network time into `wall_ms` — the
 table says which backend it scored, attribution is the reader's job. `mock`

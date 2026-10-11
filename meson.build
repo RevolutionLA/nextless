@@ -44,8 +44,8 @@ add_project_arguments('-DNEXTLESS_PACKAGED_CONFIG_DIR="' + config_install_dir + 
   language: 'cpp')
 
 subdir('ASR_provider/src')
-subdir('tests')
 subdir('tools')
+subdir('tests')
 subdir('adapter')
 
 install_man('docs/nextless.1')

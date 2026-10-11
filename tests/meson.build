@@ -94,6 +94,13 @@ test('cer_tool', find_program('run_cer_tests.sh'), timeout: 60)
 # network are stubbed on PATH, so it runs in CI like any other test.
 test('install_deb', find_program('test_install_deb.sh'), timeout: 60)
 
+# Roadmap row 5: bench_asr --denoise is what produces the deepfilter row in
+# docs/benchmarks.md. The harness must not turn a silently no-oping denoiser
+# into a published timing number, so its row contract is checked against stub
+# binaries here (the real 36 MB binary is opt-in and cannot be a CI dep).
+test('bench_denoise', find_program('test_bench_denoise.sh'),
+  args: [bench_asr.full_path()], timeout: 120)
+
 # Config-panel JSON writer: round-trips through the same extractors the
 # providers use (issue: full settings panel).
 test_json_patch = executable('test_json_patch',

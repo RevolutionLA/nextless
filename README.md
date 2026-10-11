@@ -274,11 +274,14 @@ chmod 600 ~/.config/nextless/*.json
 speexdsp ships with the build, and it is enough for a quiet room. For a noisy one you can hand
 Nextless the `deep-filter` CLI from
 [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) — it is deliberately *not* a build
-dependency, because it is a ~100 MB model plus a Rust binary:
+dependency, because it is a separate Rust binary carrying its own model:
 
 ```bash
 mkdir -p ~/.local/share/nextless/bin
-# whatever works for you: the release tarball, or `pip install deepfilternet`
+# whichever you have: a `pip install deepfilternet` binary on PATH, or the
+# release asset - the x86_64 musl one is a single 36 MB static binary with the
+# model compiled in (no tarball; `deep-filter --version` prints deep_filter 0.5.6),
+# so `chmod +x` it and symlink that path directly instead of using command -v.
 ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
 ```
 
@@ -291,6 +294,16 @@ denoiser is an external process, it is treated as untrusted: if the binary is mi
 an error, wedges (killed after 5 s) or hands the audio back unchanged, that utterance falls back
 to speexdsp instead of losing your words — and after three failures in a row DeepFilterNet is
 switched off for the rest of the session. `meson test` covers all four cases.
+
+What it costs, measured with the real binary on a 2022 i7-1260P
+([docs/benchmarks.md](docs/benchmarks.md)): **≈1.2 s per utterance** (median 1223 ms for 4.7–10 s
+clips, RTF 0.156, ~60 MB) versus single-digit milliseconds for speexdsp. The process is spawned
+per utterance, so that ~1.2 s lands between releasing the key and the first character. The 5 s
+deadline is comfortably clear up to roughly 40 s of continuous speech. It is also currently known
+to drop 69–97 ms off the end of each take ([issue #61](https://github.com/RevolutionLA/nextless/issues/61))
+— more than the 20 ms of trailing audio the VAD step keeps as protection, so on this path the
+"the last syllable is never clipped" guarantee above does not fully hold. That is why `speexdsp`
+remains the default.
 
 ## Usage
 
@@ -358,7 +371,7 @@ never rewrite real speech until you add entries yourself.
 ```bash
 meson setup build --buildtype=debug
 ninja -C build
-meson test -C build            # 20 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser, panel JSON patcher, installer digest gate
+meson test -C build            # 21 unit tests: registry, config fallback, capture, queue, silence, cancellation, denoise, missing components, capture-dir sweep, punctuation, hotwords, get_models contract, CER/WER normaliser, panel JSON patcher, installer digest gate, denoise-benchmark row contract
 ```
 
 Tests need a PulseAudio server (the capture tests open a real stream); on a headless runner
@@ -410,7 +423,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 | 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. **Fixed in [#11](https://github.com/RevolutionLA/nextless/pull/11)** — meson installs the examples as `*.json` into the build's `sysconfdir`/nextless and compiles the same path into the loader, so install and read cannot drift; CI does a staged install and fails if any packaged example stops landing (six since `hotwords.json`). | ✅ meson ships them — `/etc/nextless` for distro builds (`--sysconfdir=/etc`), `/usr/local/etc/nextless` for a plain source install, the same path the loader reads |
 | 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. **Fixed in [#12](https://github.com/RevolutionLA/nextless/pull/12)** — providers pre-check the runtime and each model file and report the exact path; the panel shows "sherpa-onnx runtime missing" / "offline model missing" with the README pointer (`test_missing_components` drives all four paths against a fake `$HOME`). | ✅ the input panel names the piece and points at the README's download section; the exact path it looked for goes to the fcitx5 log (and feeds the wizard below) |
 | 4 | **Real install and removal path**: the `.deb` half is **Fixed in [#34](https://github.com/RevolutionLA/nextless/pull/34)** (packaging, dependency list, install/purge assertions in CI) and **[#38](https://github.com/RevolutionLA/nextless/pull/38)** (published on Releases with `sha256sums.txt`, `tools/install-deb.sh` one-command route, fail-closed digest check in [#51](https://github.com/RevolutionLA/nextless/pull/51)); model fetch is `nextless-get-models` ([#5](https://github.com/RevolutionLA/nextless/issues/5)). Still open here: someone dictating a sentence on a clean Ubuntu VM, and a rollback paragraph. AUR after that. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
-| 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. | one 10 s utterance with the real binary, wall-clock and RTF recorded — or the option is retired |
+| 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. **Measured 2026-10-11** with `BACKENDS="deepfilter" tools/benchmark/run_bench.sh` against `deep_filter 0.5.6` — 7/7 utterances (4.7–10 s), median 1223 ms, RTF 0.156, 60 MB child RSS; the option stays, and the run also found [issue #61](https://github.com/RevolutionLA/nextless/issues/61). | ✅ [docs/benchmarks.md](docs/benchmarks.md) carries the row plus the committed machine header and raw JSONL |
 | 6 | **Coexistence with the typing-side IME**: document the supported combinations (wetype, fcitx5 pinyin) and the key-collision rules. | a short doc plus one smoke test per combination |
 
 The longer-term list:

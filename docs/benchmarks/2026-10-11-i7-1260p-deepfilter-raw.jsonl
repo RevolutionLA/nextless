@@ -1,0 +1,8 @@
+{"backend":"deepfilter","wav":"f-henan.wav","audio_ms":7990,"wall_ms":1300,"rtf":0.162703,"ok":true,"changed":true,"in_rms":1761.725944,"out_rms":1715.777196,"samples_out":126738}
+{"backend":"deepfilter","wav":"f-sichuan.wav","audio_ms":7835,"wall_ms":1223,"rtf":0.156094,"ok":true,"changed":true,"in_rms":1135.138229,"out_rms":874.592493,"samples_out":123802}
+{"backend":"deepfilter","wav":"utt10s.wav","audio_ms":10053,"wall_ms":1326,"rtf":0.131899,"ok":true,"changed":true,"in_rms":1642.821575,"out_rms":1613.096321,"samples_out":159523}
+{"backend":"deepfilter","wav":"z0.wav","audio_ms":10053,"wall_ms":1391,"rtf":0.138365,"ok":true,"changed":true,"in_rms":1642.821575,"out_rms":1613.096321,"samples_out":159523}
+{"backend":"deepfilter","wav":"z1.wav","audio_ms":5100,"wall_ms":817,"rtf":0.160196,"ok":true,"changed":true,"in_rms":1871.240121,"out_rms":1481.169480,"samples_out":80251}
+{"backend":"deepfilter","wav":"z2.wav","audio_ms":4690,"wall_ms":756,"rtf":0.161194,"ok":true,"changed":true,"in_rms":1466.706190,"out_rms":1162.747227,"samples_out":73890}
+{"backend":"deepfilter","wav":"z3.wav","audio_ms":8830,"wall_ms":1159,"rtf":0.131257,"ok":true,"changed":true,"in_rms":1018.402648,"out_rms":880.522142,"samples_out":139950}
+{"backend":"deepfilter","summary":true,"files":7,"failures":0,"peak_rss_kb":26392,"child_peak_rss_kb":59220}
