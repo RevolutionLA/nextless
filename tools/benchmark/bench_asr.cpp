@@ -10,9 +10,12 @@
 // Every WAV must be 16 kHz mono PCM16 (what record_corpus.sh produces).
 
 #include "asr_provider.h"
+#include "audio_capture.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -202,22 +205,104 @@ std::string copyToTempWav(const std::string &src) {
     return tmpl;
 }
 
+// Roadmap row 5: DeepFilterNet is an opt-in heavy denoiser whose real cost per
+// utterance had never been measured (the tests drive it with stub binaries).
+// This mode runs the add-on's own path - AudioCapture::dfDenoise, i.e. the same
+// 16k->48k resample, the same posix_spawn with the same bounded wait, the same
+// fallback decision - against a corpus, so the number in docs/benchmarks.md is
+// the number a user pays, not a number measured around the code.
+int runDenoise(FILE *out, const std::vector<CorpusItem> &items) {
+    auto emit = [&](const std::string &line) {
+        std::fprintf(out, "%s\n", line.c_str());
+        std::fflush(out);
+    };
+    int failures = 0;
+    // dfDenoise carries a per-session breaker (three consecutive process
+    // failures -> speexdsp for good) and this harness runs the whole corpus in
+    // one process. Blindly continuing would print rows of wall_ms=0 and the
+    // published table would read like a timing result instead of a dead end, so
+    // after three in a row the rest are labelled as not measured.
+    int consecutive = 0;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (consecutive >= 3) {
+            for (size_t j = i; j < items.size(); ++j) {
+                ++failures;
+                emit("{\"backend\":\"deepfilter\",\"wav\":\"" + jsonEscape(items[j].name) +
+                     "\",\"error\":\"not measured: three consecutive failures earlier in this run\"}");
+            }
+            break;
+        }
+        const auto &it = items[i];
+        auto wav = readWav16kMono(it.wav);
+        if (!wav.error.empty() || wav.samples.empty()) {
+            ++failures;
+            emit("{\"backend\":\"deepfilter\",\"wav\":\"" + jsonEscape(it.name) +
+                 "\",\"error\":\"" + jsonEscape(wav.error.empty() ? "empty wav" : wav.error) + "\"}");
+            continue;
+        }
+        std::vector<int16_t> samples = wav.samples;
+        auto hashOf = [](const std::vector<int16_t> &v) {
+            uint64_t h = 1469598103934665603ull;
+            for (int16_t s : v) {
+                h ^= static_cast<uint64_t>(static_cast<uint16_t>(s));
+                h *= 1099511628211ull;
+            }
+            return h;
+        };
+        auto rmsOf = [](const std::vector<int16_t> &v) {
+            long double acc = 0;
+            for (int16_t s : v) acc += static_cast<long double>(s) * s;
+            return v.empty() ? 0.0 : std::sqrt(static_cast<double>(acc / v.size()));
+        };
+        uint64_t before = hashOf(samples);
+        double rmsBefore = rmsOf(samples);
+        auto t0 = Clock::now();
+        bool ok = nextless::AudioCapture::dfDenoise(samples);
+        long wall = nowMs(t0);
+        bool changed = hashOf(samples) != before;
+        double rtf = wav.audioMs > 0 ? static_cast<double>(wall) / wav.audioMs : 0.0;
+        if (!ok) ++failures;
+        if (ok) consecutive = 0; else ++consecutive;
+        // cer.py counts a row as "ok" unless it carries an `error` field, so a
+        // row where the denoiser fell back must say so there too - otherwise the
+        // published table reads 7/7 while nothing was actually denoised.
+        emit("{\"backend\":\"deepfilter\",\"wav\":\"" + jsonEscape(it.name) +
+             "\",\"audio_ms\":" + std::to_string(static_cast<long>(wav.audioMs)) +
+             ",\"wall_ms\":" + std::to_string(wall) +
+             ",\"rtf\":" + std::to_string(rtf) +
+             ",\"ok\":" + (ok ? "true" : "false") +
+             ",\"changed\":" + (changed ? "true" : "false") +
+             (ok ? "" : ",\"error\":\"dfDenoise returned false (fell back to speexdsp)\"") +
+             ",\"in_rms\":" + std::to_string(rmsBefore) +
+             ",\"out_rms\":" + std::to_string(rmsOf(samples)) +
+             ",\"samples_out\":" + std::to_string(samples.size()) + "}");
+    }
+    emit("{\"backend\":\"deepfilter\",\"summary\":true,\"files\":" +
+         std::to_string(items.size()) + ",\"failures\":" + std::to_string(failures) +
+         ",\"peak_rss_kb\":" + std::to_string(peakRssKb()) +
+         ",\"child_peak_rss_kb\":" + std::to_string(childPeakRssKb()) + "}");
+    return failures == static_cast<int>(items.size()) ? 3 : 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     std::string backend, corpus, outPath;
+    bool denoiseMode = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto take = [&](std::string &dst) {
             if (i + 1 >= argc) { std::fprintf(stderr, "missing value for %s\n", a.c_str()); std::exit(1); }
             dst = argv[++i];
         };
-        if (a == "--backend") take(backend);
+        if (a == "--denoise") denoiseMode = true;
+        else if (a == "--backend") take(backend);
         else if (a == "--corpus") take(corpus);
         else if (a == "--out") take(outPath);
-        else { std::fprintf(stderr, "usage: %s --backend ID --corpus DIR [--out FILE]\n", argv[0]); return 1; }
+        else { std::fprintf(stderr, "usage: %s [--denoise | --backend ID] --corpus DIR [--out FILE]\n", argv[0]); return 1; }
     }
-    if (backend.empty() || corpus.empty()) return 1;
+    if (corpus.empty()) return 1;
+    if (!denoiseMode && backend.empty()) return 1;
 
     FILE *out = stdout;
     if (!outPath.empty()) {
@@ -234,6 +319,12 @@ int main(int argc, char **argv) {
     if (items.empty()) {
         emit("{\"backend\":\"" + jsonEscape(backend) + "\",\"error\":\"empty corpus\"}");
         return 2;
+    }
+
+    if (denoiseMode) {
+        int rc = runDenoise(out, items);
+        if (out != stdout) fclose(out);
+        return rc;
     }
 
     auto provider = nextless::AsrProviderRegistry::instance().create(backend);

@@ -1,0 +1,10 @@
+date: 2026-10-11T21:03:41+08:00
+host: (redacted)
+kernel: 7.0.0-38-generic
+cpu: 12th Gen Intel(R) Core(TM) i7-1260P
+threads: 16
+governor: powersave
+mem: 15562380 kB
+backends: deepfilter
+corpus: /tmp/dfcorpus
+deep-filter: deep_filter 0.5.6

@@ -5,6 +5,38 @@ All notable changes to Nextless are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and this project keeps one line per
 user-visible change rather than one per commit.
 
+## [Unreleased]
+
+### Added
+- **The optional DeepFilterNet denoiser is now measured, not assumed**
+  (roadmap row 5). `bench_asr --denoise` drives the add-on's own
+  `AudioCapture::dfDenoise()` - the same 16k→48k resample, the same
+  `posix_spawn`, the same 5 s bounded wait, the same fallback - and
+  `BACKENDS="deepfilter" tools/benchmark/run_bench.sh DIR` turns it into a
+  table row with a machine header. Against the real `deep_filter 0.5.6` binary
+  (sha256 pinned in the doc): 7/7 utterances of 4.7–10 s, median **1223 ms**,
+  **RTF 0.156**, **60 MB** child RSS, `wall ≈ 282 ms + 0.110 × audio`, so the
+  deadline only binds past ~40 s of continuous speech. The option stays, with
+  the cost stated in both READMEs. The run also found
+  [issue #61](https://github.com/RevolutionLA/nextless/issues/61): the same
+  path silently drops 69–97 ms off the *end* of every take, most of it from our
+  own unflushed resampler rather than the model.
+- `tests/test_bench_denoise.sh` (21st test) pins the harness contract against
+  stub binaries, because a benchmark that lies is worse than no benchmark: a
+  no-op denoiser must be reported as a failure *and* carry an `error` field
+  (the published table counts a row as measured unless it does), a row after
+  three consecutive failures must carry no timing number at all, and the audio
+  must come back at 16 kHz rather than at 48 kHz. All three were
+  mutation-checked.
+
+### Fixed
+- `docs/benchmarks.md` linked its own artifacts as `docs/<file>` while they live
+  in `docs/benchmarks/`, so every "prove the number" link 404'd (issue #23's
+  family of anchor drift). Both rows now resolve.
+- `run_bench.sh` no longer bakes the machine's hostname into the committed
+  machine header - the previous file was redacted by hand, which is a step
+  someone forgets. It prints `(redacted)` unless you set `HOST_LABEL`.
+
 ## [0.3.1] - 2026-10-09
 
 ### Added
