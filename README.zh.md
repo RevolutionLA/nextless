@@ -273,6 +273,61 @@ soxr 都会 flush，deep-filter 自己少给的 30 ms 用**原始音频**补回�
 但一句都不会被截掉，`dfDenoise` 从此保持音频长度不变。默认仍是 speexdsp：它每句只花几毫秒，
 也完全不改动音频长度。
 
+### 6. 卸载与回滚
+
+`apt remove fcitx5-nextless` 不会动 fcitx5 本身，所以你其他的输入法（打字侧、拼音）原样还在。
+一个注意点：如果这台机器上没有别的东西依赖 fcitx5，之后的 `apt autoremove` 可能会顺带把它也带走——
+按 yes 之前把清单看一遍。
+
+**用 `.deb` 装的** —— 下面点到的三个路径，正是 CI 的 `.deb installs clean` job 在卸载后断言「必须不存在」的那几个，所以这不是猜的：
+
+```bash
+sudo apt remove fcitx5-nextless    # 卸掉 addon .so、nextless-get-models、nextless.conf
+sudo apt purge fcitx5-nextless     # 再把 /etc/nextless 的默认配置也清掉
+fcitx5 -r -d                       # 重启输入法，让它不再被加载
+```
+
+`remove` 会刻意保留 `/etc/nextless/*.json`（dpkg 状态是 `deinstall ok config-files`），
+准备重装时这正是你要的。
+
+想退回旧版本 —— `install-deb.sh` 存在的理由之一就是新版本可能是坏的那个：
+
+```bash
+sudo dpkg -i fcitx5-nextless_0.3.1-1_amd64.deb   # 就装这个版本，含降级
+```
+
+**用 `meson install` 装的** —— meson 没有 uninstall，但它替你写下了清单：
+
+```bash
+grep -v '^#' build/meson-logs/install-log.txt | sudo xargs -d '\n' rm -f --
+```
+
+请在**当初安装用的那份 checkout 和 build 目录**里跑这条：清单记的是安装时的绝对路径，
+如果你后来换过 `--prefix` 重新 configure，它就已经不描述你的系统了。它只删文件，
+不删留下的空目录。
+
+**两条路都不会碰你 home 里的东西**，因为那些是你的文件，不是包的文件：
+
+| 路径 | 里面是什么 | 典型体积 |
+|---|---|---|
+| `~/.config/nextless/` | 你的配置，**包括可能填过的 API key** | ~30 KB |
+| `~/.local/share/nextless/models/` | 下载下来的 ASR 与标点模型 | ~1.8 GB |
+| `~/.local/share/nextless/bin/deep-filter` | 可选降噪器（装过的话） | ~35 MB |
+| `~/.config/autostart/org.fcitx.Fcitx5.desktop` | 你自己加的 fcitx5 自启项 | 1 KB |
+
+要把机器交给别人，先删 `~/.config/nextless/`。想拿回那 1.8 GB 只能删模型目录，
+`nextless-get-models` 会按需重新下载缺的部分。
+
+**确认到底加载的是哪个版本**，否则装了旧版你看不出来：
+
+```bash
+fcitx5-diagnose | grep -i nextless     # 例如 "Nextless 0.3.1"
+```
+
+如果这里显示的数字比你装的 release 旧，说明在跑的还是老 addon：要么安装那步没执行，
+要么 fcitx5 没重启。之前就有一台机器已经升到 0.3.x，`fcitx5-diagnose` 里还写着
+`Nextless 0.2.0`。
+
 ## 使用
 
 | 操作 | 按键 |
@@ -381,7 +436,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 | 1 | **CI 是红的**：debug 任务里的 `cloud_provider_queue` 失败。provider 先触发错误回调、再在作用域退出时删除临时 WAV，测试立刻 `exists()` 检查，撞上清理时序——release 只是侥幸跑赢。**已修复，[#10](https://github.com/RevolutionLA/nextless/pull/10)**——四个 provider 现在都在回调触发前删掉临时 WAV（CI debug 任务间歇性捕获；本地用 `taskset -c 0` 复现概率约 5%）。 | ✅ 两种构建都绿；修复比这条完成标准更严——「先回调、后清理」已不合法，断言保持严格而非放宽 |
 | 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。**已修复，[#11](https://github.com/RevolutionLA/nextless/pull/11)**——meson 现在把示例以 `*.json` 装进构建时的 `sysconfdir`/nextless，并把同一路径编译进 loader，安装与读取不可能再漂移；CI 会做 staged install，随包示例（自 `hotwords.json` 起共六份）少装一个就红。 | ✅ meson 确实会装——发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`），普通源码安装是 `/usr/local/etc/nextless`，与 loader 读取的路径同源 |
 | 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。**已修复，[#12](https://github.com/RevolutionLA/nextless/pull/12)**——provider 在 spawn 前预检运行时与每个模型文件，报出具体路径；面板显示「sherpa-onnx runtime missing / offline model missing」并指向 README（`test_missing_components` 用假 `$HOME` 覆盖全部四条失败路径）。 | ✅ 面板说清缺哪一块、并指到 README 的下载小节；实际找过的路径进 fcitx5 日志（也是下面向导的前置） |
-| 4 | **真正的安装与卸载路径**：`.deb` 那一半已经落地——**[#34](https://github.com/RevolutionLA/nextless/pull/34)**（打包、依赖清单、CI 里装完再卸载的断言）与 **[#38](https://github.com/RevolutionLA/nextless/pull/38)**（发布到 Releases 附 `sha256sums.txt`、`tools/install-deb.sh` 一条命令，校验在 [#51](https://github.com/RevolutionLA/nextless/pull/51) 改成 fail-closed）；模型获取是 `nextless-get-models`（[#5](https://github.com/RevolutionLA/nextless/issues/5)）。还差的：在干净 Ubuntu 虚拟机上真的念一句，以及一段回滚说明。AUR 放后面。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |
+| 4 | **真正的安装与卸载路径**：`.deb` 那一半已经落地——**[#34](https://github.com/RevolutionLA/nextless/pull/34)**（打包、依赖清单、CI 里装完再卸载的断言）与 **[#38](https://github.com/RevolutionLA/nextless/pull/38)**（发布到 Releases 附 `sha256sums.txt`、`tools/install-deb.sh` 一条命令，校验在 [#51](https://github.com/RevolutionLA/nextless/pull/51) 改成 fail-closed）；模型获取是 `nextless-get-models`（[#5](https://github.com/RevolutionLA/nextless/issues/5)）。回滚已写进文档（README「卸载与回滚」：`apt remove` 与 `purge` 的差别、用 `dpkg -i` 降级、meson 的 install-log 清单，以及用 `fcitx5-diagnose` 核对真正加载的版本），卸载/清除的残余检查也已在 CI 里跑。**还差的是一件人工活：在干净的 Ubuntu 虚拟机上真人念一句。**AUR 排在 [#35](https://github.com/RevolutionLA/nextless/issues/35)。 | VM 安装 ✅ CI 已覆盖，真人念一句 ⏳ 需要人，`apt remove` 不留残余 ✅，回滚有文档 ✅ |
 | 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。**2026-10-11 已用真实二进制测过**：`BACKENDS="deepfilter" tools/benchmark/run_bench.sh` 驱动 `deep_filter 0.5.6`，7/7 句（4.7–10 秒），每句 1.0–1.3 秒、RTF 0.13–0.16、子进程 60 MB RSS。选项保留；同一次测量挖出并修掉了 [issue #61](https://github.com/RevolutionLA/nextless/issues/61)（这个降噪器原先每句结尾少 69–97 ms）。 | ✅ [docs/benchmarks.md](docs/benchmarks.md) 里有这一行，以及随包的 machine header 与原始 JSONL |
 | 6 | **与打字侧输入法共存**：写清支持的组合（wetype、fcitx5 拼音）和抢键规则。 | 一份短文档，外加每个组合一次冒烟验证 |
 

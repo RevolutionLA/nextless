@@ -307,6 +307,64 @@ Nextless appends the last 30 ms of your *raw* audio to keep the utterance whole 
 dropped 69–97 ms off the end). `speexdsp` stays the default because it costs single-digit
 milliseconds rather than a second per utterance and never touches the audio length.
 
+### 6. Rolling back
+
+`apt remove fcitx5-nextless` does not touch fcitx5 itself, so your other input methods
+(typing-side IMEs, pinyin) stay exactly where they were. One caveat: if nothing else on the
+machine depends on fcitx5, a later `apt autoremove` can offer to take it away too - read the
+list before saying yes.
+
+**Installed from the `.deb`** - the three paths named below are exactly what CI's
+`.deb installs clean` job asserts are gone after removal, so this is not a guess:
+
+```bash
+sudo apt remove fcitx5-nextless    # the addon .so, nextless-get-models and nextless.conf go
+sudo apt purge fcitx5-nextless     # ...and the /etc/nextless defaults too
+fcitx5 -r -d                       # reload without it
+```
+
+`remove` deliberately leaves the `/etc/nextless/*.json` conffiles behind (dpkg reports
+`deinstall ok config-files`), which is what you want if you mean to reinstall.
+
+To go back to an older release instead - the reason `install-deb.sh` exists is that a new
+version can be the broken one:
+
+```bash
+sudo dpkg -i fcitx5-nextless_0.3.1-1_amd64.deb   # exactly this version, downgrade included
+```
+
+**Installed with `meson install`** - meson has no uninstall, but it wrote the manifest for you:
+
+```bash
+grep -v '^#' build/meson-logs/install-log.txt | sudo xargs -d '\n' rm -f --
+```
+
+Run that from the checkout and build directory you installed *from*: the log holds absolute
+paths recorded at install time, so if you reconfigured with a different `--prefix` since, it no
+longer describes your system. It removes files, not the empty directories they leave behind.
+
+**Neither route touches anything in your home**, because those are your files, not the package's:
+
+| path | what lives there | size on a typical box |
+|---|---|---|
+| `~/.config/nextless/` | your settings, **including any API keys** | ~30 KB |
+| `~/.local/share/nextless/models/` | the downloaded ASR + punctuation models | ~1.8 GB |
+| `~/.local/share/nextless/bin/deep-filter` | the optional denoiser, if you installed it | ~35 MB |
+| `~/.config/autostart/org.fcitx.Fcitx5.desktop` | fcitx5 autostart, only if you added it | 1 KB |
+
+Delete `~/.config/nextless/` before handing a machine over. Deleting the models directory is the
+only way to get the 1.8 GB back, and `nextless-get-models` will re-download whatever is missing.
+
+**Check what is actually loaded**, because a stale install is otherwise invisible:
+
+```bash
+fcitx5-diagnose | grep -i nextless     # e.g. "Nextless 0.3.1"
+```
+
+If that prints an older version than the release you installed, the running addon is the old one -
+either the install step did not run, or fcitx5 was never restarted. That is how a machine already
+bumped to 0.3.x kept advertising `Nextless 0.2.0`.
+
 ## Usage
 
 | Action | Keys |
@@ -424,7 +482,7 @@ Each item has a finish line, so whoever picks it up knows when it is done.
 | 1 | **CI is red**: `cloud_provider_queue` fails in the *debug* job. The provider's error callback fires before the temp WAV is removed (the deletion lives in a scope guard), so the test's `exists()` check races cleanup — release passes by luck. **Fixed in [#10](https://github.com/RevolutionLA/nextless/pull/10)** — all four providers now delete the WAV *before* the callback (caught intermittently by CI's debug job; local reproduction under `taskset -c 0` is probabilistic, ~5% on the old code). | ✅ CI is green in both build types; the fix is stronger than this finish line — callback-then-cleanup is now illegal, so the assertion stays strict instead of tolerating it |
 | 2 | **`/etc/nextless` defaults are never installed**: the config loader reads them and copies them into `~/.config/nextless/` on first use, but no install rule ships them, so every source install silently runs on compiled-in defaults. **Fixed in [#11](https://github.com/RevolutionLA/nextless/pull/11)** — meson installs the examples as `*.json` into the build's `sysconfdir`/nextless and compiles the same path into the loader, so install and read cannot drift; CI does a staged install and fails if any packaged example stops landing (six since `hotwords.json`). | ✅ meson ships them — `/etc/nextless` for distro builds (`--sysconfdir=/etc`), `/usr/local/etc/nextless` for a plain source install, the same path the loader reads |
 | 3 | **First run without models or binaries**: a missing sherpa-onnx runtime or model currently surfaces as `Zipformer: spawn failed` / `recognition failed`, with no hint of what to download. **Fixed in [#12](https://github.com/RevolutionLA/nextless/pull/12)** — providers pre-check the runtime and each model file and report the exact path; the panel shows "sherpa-onnx runtime missing" / "offline model missing" with the README pointer (`test_missing_components` drives all four paths against a fake `$HOME`). | ✅ the input panel names the piece and points at the README's download section; the exact path it looked for goes to the fcitx5 log (and feeds the wizard below) |
-| 4 | **Real install and removal path**: the `.deb` half is **Fixed in [#34](https://github.com/RevolutionLA/nextless/pull/34)** (packaging, dependency list, install/purge assertions in CI) and **[#38](https://github.com/RevolutionLA/nextless/pull/38)** (published on Releases with `sha256sums.txt`, `tools/install-deb.sh` one-command route, fail-closed digest check in [#51](https://github.com/RevolutionLA/nextless/pull/51)); model fetch is `nextless-get-models` ([#5](https://github.com/RevolutionLA/nextless/issues/5)). Still open here: someone dictating a sentence on a clean Ubuntu VM, and a rollback paragraph. AUR after that. | a clean Ubuntu VM installs, dictates, `apt remove` leaves no debris, and rollback is documented |
+| 4 | **Real install and removal path**: the `.deb` half is **Fixed in [#34](https://github.com/RevolutionLA/nextless/pull/34)** (packaging, dependency list, install/purge assertions in CI) and **[#38](https://github.com/RevolutionLA/nextless/pull/38)** (published on Releases with `sha256sums.txt`, `tools/install-deb.sh` one-command route, fail-closed digest check in [#51](https://github.com/RevolutionLA/nextless/pull/51)); model fetch is `nextless-get-models` ([#5](https://github.com/RevolutionLA/nextless/issues/5)). Rollback is now documented (README "Rolling back": `apt remove` vs `purge`, downgrading with `dpkg -i`, the meson install-log manifest, and `fcitx5-diagnose` as the version check), and remove/purge debris checks run in CI. **Still open: a human dictating one sentence on a clean Ubuntu VM.** AUR is [#35](https://github.com/RevolutionLA/nextless/issues/35). | VM install ✅ in CI, dictate-on-VM ⏳ needs a person, `apt remove` leaves no debris ✅, rollback documented ✅ |
 | 5 | **DeepFilterNet has never run for real**: the tests drive it with stub binaries, so one-shot `deep-filter` cost per utterance is unmeasured. **Measured 2026-10-11** with `BACKENDS="deepfilter" tools/benchmark/run_bench.sh` against `deep_filter 0.5.6` — 7/7 utterances (4.7–10 s), 1.0–1.3 s each, RTF 0.13–0.16, 60 MB child RSS. The option stays, and the same run found and fixed [issue #61](https://github.com/RevolutionLA/nextless/issues/61) (the denoiser had been dropping 69–97 ms off the end of every take). | ✅ [docs/benchmarks.md](docs/benchmarks.md) carries the row plus the committed machine header and raw JSONL |
 | 6 | **Coexistence with the typing-side IME**: document the supported combinations (wetype, fcitx5 pinyin) and the key-collision rules. | a short doc plus one smoke test per combination |
 

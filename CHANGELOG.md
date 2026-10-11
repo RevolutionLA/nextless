@@ -29,6 +29,18 @@ user-visible change rather than one per commit.
   must come back at 16 kHz rather than at 48 kHz. All three were
   mutation-checked.
 
+### Changed
+- The README gained a **Rolling back** section (roadmap row 4's documentation
+  half): what `apt remove` keeps (the `/etc/nextless` conffiles) versus what
+  `apt purge` drops, downgrading with `dpkg -i` when a release turns out to be
+  the broken one, the `build/meson-logs/install-log.txt` manifest for undoing a
+  `meson install` (meson has no uninstall), and the four home-directory paths
+  neither route touches - including `~/.config/nextless/`, where your API keys
+  live if you ever hand a machine over. It closes with the check that makes a
+  stale install visible, `fcitx5-diagnose | grep -i nextless`: a box bumped to
+  0.3.x was still advertising `Nextless 0.2.0` because the addon had never been
+  reinstalled or reloaded.
+
 ### Fixed
 - **`denoise: deepfilter` no longer eats the end of your sentence** (issue #61).
   Both legs of the 16 kHz → 48 kHz → 16 kHz round trip called `soxr_process()`
