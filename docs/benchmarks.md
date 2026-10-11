@@ -57,8 +57,10 @@ deep-filter". `first token` and `cold` are `--` because this is a denoiser: it h
 streaming output and no warm/cold split — **every** call spawns the process
 again, so the ~280 ms of spawn + model load is paid once per utterance. Fit
 over the seven rows: `wall_ms ≈ 282 + 0.110 × audio_ms` (R² 0.89), median RTF
-0.156, range 0.131–0.163; a repeat run gave 0.151, so the number is stable to a
-few percent. RSS is 26 MB harness + 59 MB child — two orders of magnitude below
+0.156, per-row range 0.131–0.163. A second run minutes later printed 0.151, which
+looked like stability — the third run (after the fix below) printed 0.131, so the
+repeat that agreed was luck: treat single-digit differences between runs as noise.
+RSS is 26 MB harness + 59 MB child — two orders of magnitude below
 the ASR models, so "heavy" in the docs refers to CPU, not memory.
 
 What this decides:
@@ -69,10 +71,46 @@ What this decides:
   the open question in row 5, and it is now measured rather than assumed.
 - **It is not free.** ~1.2 s added to the end-of-speech → first-character gap,
   per utterance, on every take. `speexdsp` (default) costs single-digit ms.
-- **It loses audio.** 69–97 ms off the *end* of every take, most of it from our
-  own unflushed resampler round trip rather than the model. That is
+- **It lost audio** (fixed further down this page, same day). 69–97 ms off the
+  *end* of every take, most of it from our own unflushed resampler round trip
+  rather than the model. That is
   [issue #61](https://github.com/RevolutionLA/nextless/issues/61), found by this
   measurement; `samples_out` per row in the raw JSONL is the evidence.
+
+### Same corpus after the issue #61 fix (same day)
+
+Machine header: [2026-10-11-i7-1260p-deepfilter-fixed-machine.txt](benchmarks/2026-10-11-i7-1260p-deepfilter-fixed-machine.txt)
+· raw outputs: [2026-10-11-i7-1260p-deepfilter-fixed-raw.jsonl](benchmarks/2026-10-11-i7-1260p-deepfilter-fixed-raw.jsonl)
+
+| backend | ok | RTF (warm) | wall median (ms) | peak RSS (GB) |
+|---|---|---|---|---|
+| deepfilter | 7/7 | 0.131 | 1043 | 0.05 |
+
+`deficit = audio_ms × 16 − samples_out` per row, before → after:
+
+| wav | before | after |
+|---|---|---|
+| f-henan.wav | 1102 (69 ms) | 0 |
+| f-sichuan.wav | 1558 (97 ms) | 0 |
+| utt10s.wav | 1325 (83 ms) | −2 (0 ms) |
+| z1.wav | 1349 (84 ms) | 0 |
+| z2.wav | 1150 (72 ms) | 0 |
+
+Two changes: both resampler legs are now flushed with `in = NULL` (soxr's actual
+end-of-input signal — `ilen = 0` is not one), which on a length-preserving stub
+takes the round trip from `16000 in → 15170 out` to exact, and the model's own
+30 ms framing loss (1440 samples at 48 kHz, measured with a burst probe: lag 0,
+corr 0.983, so it is truncation not delay) is padded back from the raw input
+instead of being dropped. The −2 on the 10 s clips is 2 samples *over*
+`audio_ms × 16`, i.e. WAV-header rounding in the expected value, not extra
+audio: the invariant under test is `samples_out == samples_in`.
+
+**Do not read 0.156 → 0.131 as a speed-up from the fix.** Three runs of this
+corpus on this machine within twenty minutes gave wall medians of
+1223 / 1275 / 1043 ms (RTF 0.156 / 0.163 / 0.131): thermal state and scheduling
+move this harness by ~20%. Quote the denoiser as **RTF ≈ 0.13–0.16, about 1.0–1.3 s
+per 5–10 s utterance**, and read the deficit column above as the point of this
+row. The same caveat applies to the single-run ASR rows at the top of the file.
 
 ## Relation to the old README numbers
 

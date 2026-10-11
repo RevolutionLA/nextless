@@ -262,14 +262,16 @@ Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。�
 丢掉你说的话；连续失败三次，本次会话就不再尝试。这四种情况都有 `meson test` 覆盖。
 
 真实二进制的代价（2026-10-11，i7-1260P，数据在
-[docs/benchmarks.md](docs/benchmarks.md)）：**每句约 1.2 秒**（4.7–10 秒素材，中位 1223 ms，
-RTF 0.156，子进程 60 MB RSS），而 speexdsp 只有几毫秒。进程是每句重新 spawn 的，所以这 1.2 秒落在
-「松手」和「出字」之间。按实测拟合（`wall ≈ 282 + 0.110 × 音频毫秒`），5 秒超时大约要连续说到
-40 秒以上才会触发，超时那一句退回 speexdsp，不会卡住。
+[docs/benchmarks.md](docs/benchmarks.md)）：**5–10 秒素材每句约 1.0–1.3 秒**（三次实测
+RTF 0.13–0.16，子进程 ~60 MB RSS），而 speexdsp 只有几毫秒。进程是每句重新 spawn 的，所以这一秒
+落在「松手」和「出字」之间；5 秒超时大概要连续说 30 秒以上才会碰到，超时那一句退回 speexdsp，
+不会卡住。
 
-但它在 [issue #61](https://github.com/RevolutionLA/nextless/issues/61) 里会**吃掉每句结尾
-69–97 ms** —— 比 VAD 裁剪特意保留的 20 ms 尾巴还多，所以开了这个降噪之后，上面「最后一个字不会被
-切掉」那条保证就不完全成立了。这也是默认仍然用 speexdsp 的原因。
+上面「最后一个字不会被切掉」这条保证对开启它的人来说曾经是不成立的：往返重采样每句悄悄少掉
+69–97 ms（[issue #61](https://github.com/RevolutionLA/nextless/issues/61)，已修）。现在两段
+soxr 都会 flush，deep-filter 自己少给的 30 ms 用**原始音频**补回结尾 —— 也就是最后 30 ms 没降噪，
+但一句都不会被截掉，`dfDenoise` 从此保持音频长度不变。默认仍是 speexdsp：它每句只花几毫秒，
+也完全不改动音频长度。
 
 ## 使用
 
@@ -380,7 +382,7 @@ Nextless fork 自 **xander-lin 的 [vinput](https://github.com/xander-lin/vinput
 | 2 | **`/etc/nextless` 的默认配置从未被安装**：配置读取逻辑会去读它、并在首次使用时复制到 `~/.config/nextless/`，但没有任何 install 规则把它装进去——所以源码安装实际上一直在用编译进代码的默认值。**已修复，[#11](https://github.com/RevolutionLA/nextless/pull/11)**——meson 现在把示例以 `*.json` 装进构建时的 `sysconfdir`/nextless，并把同一路径编译进 loader，安装与读取不可能再漂移；CI 会做 staged install，随包示例（自 `hotwords.json` 起共六份）少装一个就红。 | ✅ meson 确实会装——发行版构建是 `/etc/nextless`（`--sysconfdir=/etc`），普通源码安装是 `/usr/local/etc/nextless`，与 loader 读取的路径同源 |
 | 3 | **没模型/没二进制时的首次运行**：现在只会显示 `Zipformer: spawn failed` / `recognition failed`，完全不提示要下载什么。**已修复，[#12](https://github.com/RevolutionLA/nextless/pull/12)**——provider 在 spawn 前预检运行时与每个模型文件，报出具体路径；面板显示「sherpa-onnx runtime missing / offline model missing」并指向 README（`test_missing_components` 用假 `$HOME` 覆盖全部四条失败路径）。 | ✅ 面板说清缺哪一块、并指到 README 的下载小节；实际找过的路径进 fcitx5 日志（也是下面向导的前置） |
 | 4 | **真正的安装与卸载路径**：`.deb` 那一半已经落地——**[#34](https://github.com/RevolutionLA/nextless/pull/34)**（打包、依赖清单、CI 里装完再卸载的断言）与 **[#38](https://github.com/RevolutionLA/nextless/pull/38)**（发布到 Releases 附 `sha256sums.txt`、`tools/install-deb.sh` 一条命令，校验在 [#51](https://github.com/RevolutionLA/nextless/pull/51) 改成 fail-closed）；模型获取是 `nextless-get-models`（[#5](https://github.com/RevolutionLA/nextless/issues/5)）。还差的：在干净 Ubuntu 虚拟机上真的念一句，以及一段回滚说明。AUR 放后面。 | 干净的 Ubuntu 虚拟机上装完能听写，`apt remove` 不留残余，回滚有文档 |
-| 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。**2026-10-11 已用真实二进制测过**：`BACKENDS="deepfilter" tools/benchmark/run_bench.sh` 驱动 `deep_filter 0.5.6`，7/7 句（4.7–10 秒），中位 1223 ms、RTF 0.156、子进程 60 MB RSS；选项保留，同时这次测量挖出了 [issue #61](https://github.com/RevolutionLA/nextless/issues/61)。 | ✅ [docs/benchmarks.md](docs/benchmarks.md) 里有这一行，以及随包的 machine header 与原始 JSONL |
+| 5 | **DeepFilterNet 从没真跑过**：测试全用桩二进制驱动，真实 `deep-filter` 单句耗时从未测过。**2026-10-11 已用真实二进制测过**：`BACKENDS="deepfilter" tools/benchmark/run_bench.sh` 驱动 `deep_filter 0.5.6`，7/7 句（4.7–10 秒），每句 1.0–1.3 秒、RTF 0.13–0.16、子进程 60 MB RSS。选项保留；同一次测量挖出并修掉了 [issue #61](https://github.com/RevolutionLA/nextless/issues/61)（这个降噪器原先每句结尾少 69–97 ms）。 | ✅ [docs/benchmarks.md](docs/benchmarks.md) 里有这一行，以及随包的 machine header 与原始 JSONL |
 | 6 | **与打字侧输入法共存**：写清支持的组合（wetype、fcitx5 拼音）和抢键规则。 | 一份短文档，外加每个组合一次冒烟验证 |
 
 方向清单：

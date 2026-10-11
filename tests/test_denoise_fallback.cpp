@@ -103,9 +103,56 @@ int main() {
         "truncate -s \"$n\" \"$f.tmp\"\n"
         "mv \"$f.tmp\" \"$f\"\n");
 
+    // 真实 deep-filter 会砍掉结尾：每个文件正好少 1440 个 48k 采样（30 ms），且与
+    // 输入零时移。chop.sh 复刻这个形状（头里的长度故意不修，readWavPcm 会按文件
+    // 实际大小夹住）。gut.sh 是返回只剩一半的模型 —— 那种结果必须算失败。
+    writeScript(root / "chop.sh",
+        "#!/bin/sh\n"
+        "f=\"$4\"\n"
+        "n=$(wc -c < \"$f\")\n"
+        "body=$(( n - 44 - 2880 ))\n"
+        "head -c 44 \"$f\" > \"$f.tmp\"\n"
+        "dd if=/dev/zero bs=1024 count=$(( (body + 1023) / 1024 )) >> \"$f.tmp\" 2>/dev/null\n"
+        "truncate -s $(( 44 + body )) \"$f.tmp\"\n"
+        "mv \"$f.tmp\" \"$f\"\n");
+    writeScript(root / "gut.sh",
+        "#!/bin/sh\n"
+        "f=\"$4\"\n"
+        "n=$(wc -c < \"$f\")\n"
+        "body=$(( (n - 44) / 2 ))\n"
+        "head -c 44 \"$f\" > \"$f.tmp\"\n"
+        "dd if=/dev/zero bs=1024 count=$(( (body + 1023) / 1024 )) >> \"$f.tmp\" 2>/dev/null\n"
+        "truncate -s $(( 44 + body )) \"$f.tmp\"\n"
+        "mv \"$f.tmp\" \"$f\"\n");
+
+    // 这两条排在 zero.sh 之前：一次成功就会把连续失败计数清零，后面的
+    // 「三次失败停用」序列不受影响。
+    const auto gutted = run((root / "gut.sh").string());
+    check("a mostly-missing result is not a success", !gutted.ok);
+    check("a mostly-missing result keeps the audio", audioIntact(gutted));
+
+    const auto chopped = run((root / "chop.sh").string());
+    check("a 30 ms-short result still counts as success", chopped.ok);
+    check("the denoised audio keeps the full utterance",
+          chopped.samples.size() == kToneSamples);
+    // body 被 stub 刷成 0，所以「结尾非 0」只可能来自原样补回的采样。断点位置是
+    // 有分量的：1440 个 48k 采样回到 16k 正好 480 个，所以 -481 必须还是模型给的
+    // 0、-480 必须是原始波形。少 flush 一段（重采样自己就会少 341+830 个）会把断点
+    // 往前推，这条就会红 —— 它同时证明两段重采样都冲干净了，而不只是长度对得上。
+    check("compensation stops exactly at the model's 30 ms",
+          chopped.samples.size() == kToneSamples &&
+          chopped.samples[kToneSamples - 481] == 0 &&
+          chopped.samples[kToneSamples - 480] != 0 &&
+          chopped.samples[kToneSamples - 1] != 0);
+    check("the body still comes back from the model",
+          chopped.samples.size() == kToneSamples &&
+          chopped.samples[kToneSamples / 2] == 0);
+
     const auto processed = run((root / "zero.sh").string());
     check("a working deep-filter succeeds", processed.ok);
     check("a working deep-filter is prompt", processed.ms < 3000);
+    check("a length-preserving deep-filter keeps the full utterance",
+          processed.samples.size() == kToneSamples);
     bool silenced = !processed.samples.empty();
     for (auto value : processed.samples) {
         if (value != 0) { silenced = false; break; }
