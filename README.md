@@ -358,7 +358,7 @@ only way to get the 1.8 GB back, and `nextless-get-models` will re-download what
 **Check what is actually loaded**, because a stale install is otherwise invisible:
 
 ```bash
-fcitx5-diagnose | grep -i nextless     # e.g. "Nextless 0.3.1"
+fcitx5-diagnose | grep -i nextless     # e.g. "Nextless 10.12.0"
 ```
 
 If that prints an older version than the release you installed, the running addon is the old one -

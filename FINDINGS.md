@@ -836,3 +836,23 @@ Roadmap 上 "Silence should be a no-op, not an `ASR error: empty result`" 的实
 #### 未处理风险
 - VAD 跑在 EBU R128 归一化**之后**，所以安静房间的底噪会被 +107 dB 的增益抬成"有语音"，静音仍然白花一次进程调用（约 1.4s）。正确修法是对归一化前的信号做 VAD，或给增益设上限（例如 30 dB）。这条与降噪顺序纠缠，单独处理。
 - `Nextless: no audio captured` / `microphone read failed` 这类状态同样没有清理时机，只是它们本来就该被看见。
+
+### 2026-10-12 — 版本号改成日期制（用户定的规则）
+
+#### 决策
+- 从 **`10.12.0`** 起不再用 semver，改成 **`MM.DD.N`**：当天第一个版本 `N=0`，同一天再发就是 `10.12.1`。tag 是版本号加 `v` 前缀（`v10.12.0`）。已有的 `0.2.0/0.3.0/0.3.1` 保留为历史，不回溯改写。
+- 规则写在三处，因为读的人不同：`CHANGELOG.md` 顶部（发布口径权威）、`release.yml` 头部注释（打 tag 的人先看到）、`debian/changelog` 条目里（打包者）。
+
+#### 发一个版本要动的地方（这次的全集）
+- `meson.build` 的 `version:` —— addon 版本是从它注入 `adapter/src/nextless-addon.conf.in` 的 `@PROJECT_VERSION@`，所以 **`fcitx5-diagnose` 显示的就是这一个值**。本机升之前显示 0.2.0、仓库已经是 0.3.1，说明那次之后没重装 addon；这就是「版本对不上到底哪来的」的答案。
+- `debian/changelog` 新条目 `fcitx5-nextless (<ver>-1)`：星期的英文缩写必须是**真实星期**（dpkg 校验；用 `LC_ALL=C date -d <day> +"%a, %d %b %Y %H:%M:%S %z"`），条目之间恰好一个空行。本地先 `dpkg-parsechangelog -l debian/changelog` 验，别等 CI。
+- `docs/nextless.1` 的 `.TH` 日期与版本两个参数。
+- `CHANGELOG.md`：`## [Unreleased]` 改名成 `## [<ver>] - <YYYY-MM-DD>`；release.yml 的发布说明就是按 `## [<ver>]` 抓这一段，抓不到只发警告不发正文。
+- tag 与 `debian/changelog` 不一致时 mismatch 门会**拒绝发布**，所以顺序固定为：bump PR → 合 main → 打 tag → push tag。
+
+#### 风险与判断
+- 排序没问题：dpkg 里 `10.12.0 > 0.3.1`（先比第一段），GitHub `releases/latest` 也跟新版本；`install-deb.sh` 只按 `${tag}-1_amd64.deb` 拼确定性文件名，对版本形状没有假设。
+- 代价要说清楚：日期版本号看不出「补丁还是破坏性变更」。缓解是发布说明必须有实质内容（现在强制从 CHANGELOG 取），以及 CHANGELOG 一行只写一条用户可见变化。
+
+#### 验证
+- `dpkg-parsechangelog` 解析新条目通过，时间戳 `Mon, 12 Oct 2026 08:50:00 +0800`；`meson test -C build` 21/21。

@@ -44,7 +44,9 @@ Use [GitHub Security Advisories](https://github.com/RevolutionLA/nextless/securi
 — private, and the right channel. Please do not open a public issue.
 
 I aim to reply within 7 days and ship a fix or a mitigation within 30. Reportedly affected
-versions: `0.3.1` and everything before it, including upstream `vinput`.
+versions: every release, `10.12.0` included (and upstream `vinput`) - assume your version is
+affected until an advisory says otherwise. Versions before `10.12.0` were numbered semver
+(`0.3.1` was the last of them).
 
 Not valid on its own: an open port, a missing HTTP header, a dependency advisory without an
 exploitable path through this add-on, or "the cloud backend sends my audio to a cloud backend".

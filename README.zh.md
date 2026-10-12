@@ -321,7 +321,7 @@ grep -v '^#' build/meson-logs/install-log.txt | sudo xargs -d '\n' rm -f --
 **确认到底加载的是哪个版本**，否则装了旧版你看不出来：
 
 ```bash
-fcitx5-diagnose | grep -i nextless     # 例如 "Nextless 0.3.1"
+fcitx5-diagnose | grep -i nextless     # 例如 "Nextless 10.12.0"
 ```
 
 如果这里显示的数字比你装的 release 旧，说明在跑的还是老 addon：要么安装那步没执行，
