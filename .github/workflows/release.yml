@@ -1,8 +1,15 @@
 name: Release
 
-# Push a version tag (v0.2.0, v0.3.1, ...) and this job builds the .deb on
-# Ubuntu 24.04 and publishes it as a GitHub Release asset with sha256sums -
-# that release is what tools/install-deb.sh downloads.
+# Push a version tag and this job builds the .deb on Ubuntu 24.04 and publishes
+# it as a GitHub Release asset with sha256sums - that release is what
+# tools/install-deb.sh downloads.
+#
+# Tags are the version with a v prefix. Since 10.12.0 the versions are
+# date-based MM.DD.N (first release of a day = .0), so v10.12.0, v10.12.1, ...;
+# the older v0.x tags were semantic. Whatever the shape, the tag must equal the
+# top debian/changelog version (plus the -1 revision) or the mismatch gate below
+# refuses to publish - that check is what makes a bumped meson.build and a
+# forgotten changelog impossible to ship together.
 
 "on":
   push:

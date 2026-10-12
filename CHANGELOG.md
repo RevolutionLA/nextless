@@ -1,11 +1,17 @@
 # Changelog
 
 All notable changes to Nextless are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html), and this project keeps one line per
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project keeps one line per
 user-visible change rather than one per commit.
 
-## [Unreleased]
+**Version scheme.** Since `10.12.0` the versions are date-based: `MM.DD.N`, where `N` counts
+releases made that day starting at 0 - so `10.12.0` is "October 12th, first cut", and a second
+release the same day would be `10.12.1`. The tag is the version with a `v` prefix (`v10.12.0`),
+which is what `.github/workflows/release.yml` matches and what must equal `debian/changelog`
+(`10.12.0-1`) or the publish step refuses to run. The earlier `0.x` line was semantic versioning;
+it stays as history and `dpkg` still orders it correctly (`10.12.0` upgrades `0.3.1`).
+
+## [10.12.0] - 2026-10-12
 
 ### Added
 - **The optional DeepFilterNet denoiser is now measured, not assumed**

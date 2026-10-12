@@ -1,5 +1,5 @@
 project('fcitx5-nextless', 'cpp',
-  version: '0.3.1',
+  version: '10.12.0',
   default_options: ['cpp_std=c++20', 'warning_level=2', 'werror=true'])
 
 # warning_level=2 is -Wall -Wextra (plus -Werror); 3 would add -Wpedantic, and that one is not

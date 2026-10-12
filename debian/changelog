@@ -1,3 +1,26 @@
+fcitx5-nextless (10.12.0-1) unstable; urgency=medium
+
+  * Capture-path behaviour fix (issue #61): with denoise=deepfilter, both legs
+    of the 16k -> 48k -> 16k resample are now drained (soxr returns its
+    group-delay tail only when end-of-input is signalled with in == NULL, not
+    with ilen == 0), and deep-filter's own constant 30 ms is appended back from
+    the raw input. A denoised utterance therefore keeps its full length instead
+    of silently losing 69-97 ms off the end, which is where the last syllable
+    lives. A response more than 160 ms short is treated as a malfunction and
+    falls back to speexdsp rather than being padded into a half-denoised buffer.
+  * Benchmark harness: bench_asr --denoise (and BACKENDS="deepfilter" in
+    run_bench.sh) measures the add-on's own dfDenoise(). docs/benchmarks.md
+    carries the first real-binary DeepFilterNet row - RTF 0.13-0.16, ~1.0-1.3 s
+    per 5-10 s utterance, 60 MB - with the machine header and raw JSONL
+    committed next to it.
+  * README: the measured DeepFilterNet cost, and a new "Rolling back" section
+    (apt remove vs purge, downgrading with dpkg -i, the meson install-log
+    manifest, and fcitx5-diagnose as the which-version-is-loaded check).
+  * Versioning moves to date-based MM.DD.N (first release of a day is .0);
+    this is the first under that scheme and supersedes 0.3.1.
+
+ -- RevolutionLA <revolutionla@users.noreply.github.com>  Mon, 12 Oct 2026 08:50:00 +0800
+
 fcitx5-nextless (0.3.1-1) unstable; urgency=medium
 
   * Bug-fix release, no new configuration surface:
