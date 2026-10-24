@@ -99,234 +99,24 @@ Linux 上的语音转文字工具不少，但**不打断你工作的听写**很�
 
 ## 安装
 
-### 0. 选一条路
+三条路线选一条即可。**完整版**（模型下载、升级、卸载、「装完了却没反应」的排查）在
+**[docs/install.md](docs/install.md)**。
 
-**Arch**：仓库里的 `PKGBUILD` 直接 `makepkg -si`（产出 `fcitx5-nextless-git`）。
-
-**Debian / Ubuntu**：一条命令，从 GitHub Release 拉最新 `.deb`，校验 sha256，依赖（含
-fcitx5）全部交给发行版自己的 apt 解析：
+**Debian / Ubuntu（一条命令）** —— 从最新 Release 拉 `.deb`，用 `sha256sums.txt` 校验后再交给 apt 装依赖：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RevolutionLA/nextless/main/tools/install-deb.sh | sudo bash
-```
-
-脚本最后会打印它不会替你做的那两步：`nextless-get-models --zipformer --punctuation`
-（模型刻意不进包）和 `fcitx5 -r -d`。装之前它会先拿 `.deb` 和 Release 上的
-`sha256sums.txt` 比对；校验文件取不到、或这个包不在清单里——正是发布产物被动过的样子——
-脚本直接停下，要你显式确认才继续：`... | sudo bash -s -- --allow-unverified`。
-目前只提供 amd64；其他架构自行构建：
-
-```bash
-sudo apt install -y build-essential dpkg-dev debhelper git
-git clone https://github.com/RevolutionLA/nextless.git
-cd nextless
-sudo apt build-dep ./          # 依赖清单以 debian/control 为准，不在 README 里维护第二份
-dpkg-buildpackage -us -uc -b   # 不加 -d，构建前会把这份清单真检查一遍
-sudo apt install ../fcitx5-nextless_*.deb && fcitx5 -r -d
-```
-
-CI 每个 PR 都会构建这个包、装进干净的 runner、再卸载检查不留残余，所以打包不是二等路径。
-模型文件刻意**不在**包里（约 1.6 GB）——下面的第 4 步按需下载。包发布在
-[GitHub Releases](https://github.com/RevolutionLA/nextless/releases)（附 sha256sums）；
-apt 源与 AUR 还没上线（#35）。
-
-### 1. 构建
-
-```bash
-# Debian / Ubuntu
-sudo apt install -y g++ meson ninja-build git \
-  libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev \
-  libpulse-dev libebur128-dev libcurl4-openssl-dev libspeexdsp-dev libsoxr-dev
-
-# 上面的包名在 Ubuntu 26.04 上用 apt-cache 逐个查过；Ubuntu 源里没有 libfcitx5-dev
-# 这个元包。Debian 的包名看起来一样但未经实机验证，如果有出入欢迎提 issue。
-# Fedora：dnf install gcc-c++ meson ninja-build pkgconf-pkg-config fcitx5-devel libpulse-devel \
-#         libebur128-devel libcurl-devel speexdsp-devel soxr-devel   （CI 还没验过）
-
-git clone https://github.com/RevolutionLA/nextless.git
-cd nextless
-meson setup build --prefix=/usr --buildtype=release
-ninja -C build
-sudo meson install -C build
-```
-
-> `meson.build` 里默认 `warning_level=2` + `werror=true`，CI 就按这个配置构建，所以任何新的
-> `-Wall`/`-Wextra` 告警都会让构建失败。本地想临时放宽：`meson configure build -Dwerror=false`。
-> `-Wpedantic` 是**故意不开**的：fcitx5 自己的 `FCITX_CONFIGURATION` / `FCITX_DECLARE_PRIVATE`
-> 宏展开后会在类作用域多出一个 `;`，各发行版打包的 fcitx5 版本会因此报错（fcitx5 头文件也因此按
-> 系统头引入）。这个坑不该由我们来填。
-
-### 2. 加载插件
-
-清单装在 `/usr/share/fcitx5/addon/nextless.conf`，`OnDemand=False`，所以重启 fcitx5 就够了。
-它是 module 不是 ime，**不用**加进输入法列表。
-
-```bash
+nextless-get-models --zipformer --punctuation   # 模型刻意不放进 .deb
 fcitx5 -r -d
 ```
 
-### 3. 选你的触发键
+**Arch** —— 用仓库里的 `PKGBUILD`：`makepkg -si`（产出 `fcitx5-nextless-git`）。
 
-`fcitx5 配置工具 → 插件 → Nextless → Push-to-talk key`，或者：
+**源码构建** —— `meson setup build && meson compile -C build && sudo meson install -C build`；
+CI 每次提交都按这条路径在 Ubuntu 上构建。
 
-```bash
-mkdir -p ~/.config/fcitx5/conf
-cat > ~/.config/fcitx5/conf/nextless.conf <<'EOF'
-[Hotkey]
-0=Control_R
-
-DefaultProvider=zipformer
-EOF
-fcitx5 -r -d
-```
-
-### 4. 下载模型（离线后端）
-
-```bash
-nextless-get-models
-```
-
-整步就这一条命令。这个助手（随插件一起安装；装之前想跑就是仓库里的
-`tools/get_models.sh`）会检测 CPU 架构、下载前先把体积报给你、并让你在三选一里挑
-Zipformer / FireRed / 都要（`--backend=...`；没有终端时它会要求把这面旗写明确，而不是
-替你选最大的那个）。它只写 `~/.local/share/nextless/` 这一个目录；重复运行会跳过已装好的
-部分；**每个归档包在解压前都会先比对固化的 sha256**，解压出来的目录名也要和
-`advanced.json` 期望的一致才会落位，所以下载损坏或被换包都不会留下半个模型。
-`--dry-run` 只打印计划，不动任何东西；
-`--punctuation` 会额外下载可选的标点模型（约 62 MB），装上后本地后端自动补 ，。？
-——交互式运行会直接问你要不要装。如果固化的 sherpa-onnx 运行时不再带标点所需的二进制，
-它会拒绝到底，而不是给你装出一个静默空转的配置。
-
-想自己动手的话，手工路径：
-
-```bash
-mkdir -p ~/.local/share/nextless/sherpa-onnx ~/.local/share/nextless/models
-cd /tmp
-
-# sherpa-onnx 运行时：bin/ 和 lib/ 都要拷，二进制用的是 rpath $ORIGIN/../lib
-# aarch64 的资产名是 ...-linux-aarch64-shared-cpu.tar.bz2（去掉 -cpu 会 404）
-V=1.13.8
-curl -LO "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${V}/sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
-tar xf "sherpa-onnx-v${V}-linux-x64-shared.tar.bz2"
-cp -r "sherpa-onnx-v${V}-linux-x64-shared/"{bin,lib} ~/.local/share/nextless/sherpa-onnx/
-
-M=https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models
-mkdir -p ~/.local/share/nextless/models
-
-# Zipformer 中英混说（流式 transducer，fp32 约 360 MB）
-curl -LO "$M/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2"
-tar xf sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2 -C ~/.local/share/nextless/models/
-
-# FireRed ASR2 int8（离线 AED，约 1.2 GB，更准更慢）
-curl -LO "$M/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2"
-tar xf sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2 -C ~/.local/share/nextless/models/
-
-rm -f sherpa-onnx-*.tar.bz2
-```
-
-解压出来的目录名和代码里的默认路径完全一致，不需要改名。想放别处就改
-`~/.config/nextless/advanced.json`。
-
-听写时如果运行时或某个模型文件缺失，输入法面板会直接说缺的是哪一块、让你跑
-`nextless-get-models`——不再是干巴巴的 `spawn failed` / `recognition failed`；它实际
-找过的路径会写进 fcitx5 日志。
-
-云端后端不需要模型，只要凭据：
-
-```bash
-mkdir -p ~/.config/nextless
-echo '{"api_key":"<火山引擎 APP Key>","resource_id":"volc.seedasr.auc"}' > ~/.config/nextless/doubao.json
-echo '{"api_key":"<sk-...>"}' > ~/.config/nextless/qwen.json
-chmod 600 ~/.config/nextless/*.json
-```
-
-### 5. 可选：DeepFilterNet3 降噪
-
-speexdsp 随构建一起装好，安静环境够用。环境吵就把 DeepFilterNet 的
-`deep-filter` 命令行交给它 —— 刻意不做成构建依赖，因为它是自带模型的独立 Rust 二进制：
-
-```bash
-mkdir -p ~/.local/share/nextless/bin
-# 两种都行：pip install deepfilternet 装到 PATH 上的二进制，或者 release asset。
-# x86_64 musl 那个 asset 就是单个 36 MB 静态二进制（模型已编译进去，没有 tar 包，
-# `deep-filter --version` 输出 deep_filter 0.5.6）—— 用它就 chmod +x 后直接把路径
-# symlink 过去，别用 command -v。
-ln -s "$(command -v deep-filter)" ~/.local/share/nextless/bin/deep-filter
-```
-
-不放这个路径也行，用 `NEXTLESS_DEEP_FILTER=/usr/bin/deep-filter` 指过去（需要写进 fcitx5 的运行
-环境）。开关是 `Shift+触发键` 后按 ↑/↓，选择会写进 `~/.config/nextless/audio.json`。
-
-Nextless 会先重采样到 48 kHz 交给模型，再采回 16 kHz 送识别。因为降噪是外部进程，一律当成不可信：
-二进制不存在、非零退出、卡住（5 秒后杀掉）或者原样把音频退回来，这一句都会退回 speexdsp 而不是
-丢掉你说的话；连续失败三次，本次会话就不再尝试。这四种情况都有 `meson test` 覆盖。
-
-真实二进制的代价（2026-10-11，i7-1260P，数据在
-[docs/benchmarks.md](docs/benchmarks.md)）：**5–10 秒素材每句约 1.0–1.3 秒**（三次实测
-RTF 0.13–0.16，子进程 ~60 MB RSS），而 speexdsp 只有几毫秒。进程是每句重新 spawn 的，所以这一秒
-落在「松手」和「出字」之间；5 秒超时大概要连续说 30 秒以上才会碰到，超时那一句退回 speexdsp，
-不会卡住。
-
-上面「最后一个字不会被切掉」这条保证对开启它的人来说曾经是不成立的：往返重采样每句悄悄少掉
-69–97 ms（[issue #61](https://github.com/RevolutionLA/nextless/issues/61)，已修）。现在两段
-soxr 都会 flush，deep-filter 自己少给的 30 ms 用**原始音频**补回结尾 —— 也就是最后 30 ms 没降噪，
-但一句都不会被截掉，`dfDenoise` 从此保持音频长度不变。默认仍是 speexdsp：它每句只花几毫秒，
-也完全不改动音频长度。
-
-### 6. 卸载与回滚
-
-`apt remove fcitx5-nextless` 不会动 fcitx5 本身，所以你其他的输入法（打字侧、拼音）原样还在。
-一个注意点：如果这台机器上没有别的东西依赖 fcitx5，之后的 `apt autoremove` 可能会顺带把它也带走——
-按 yes 之前把清单看一遍。
-
-**用 `.deb` 装的** —— 下面点到的三个路径，正是 CI 的 `.deb installs clean` job 在卸载后断言「必须不存在」的那几个，所以这不是猜的：
-
-```bash
-sudo apt remove fcitx5-nextless    # 卸掉 addon .so、nextless-get-models、nextless.conf
-sudo apt purge fcitx5-nextless     # 再把 /etc/nextless 的默认配置也清掉
-fcitx5 -r -d                       # 重启输入法，让它不再被加载
-```
-
-`remove` 会刻意保留 `/etc/nextless/*.json`（dpkg 状态是 `deinstall ok config-files`），
-准备重装时这正是你要的。
-
-想退回旧版本 —— `install-deb.sh` 存在的理由之一就是新版本可能是坏的那个：
-
-```bash
-sudo dpkg -i fcitx5-nextless_0.3.1-1_amd64.deb   # 就装这个版本，含降级
-```
-
-**用 `meson install` 装的** —— meson 没有 uninstall，但它替你写下了清单：
-
-```bash
-grep -v '^#' build/meson-logs/install-log.txt | sudo xargs -d '\n' rm -f --
-```
-
-请在**当初安装用的那份 checkout 和 build 目录**里跑这条：清单记的是安装时的绝对路径，
-如果你后来换过 `--prefix` 重新 configure，它就已经不描述你的系统了。它只删文件，
-不删留下的空目录。
-
-**两条路都不会碰你 home 里的东西**，因为那些是你的文件，不是包的文件：
-
-| 路径 | 里面是什么 | 典型体积 |
-|---|---|---|
-| `~/.config/nextless/` | 你的配置，**包括可能填过的 API key** | ~30 KB |
-| `~/.local/share/nextless/models/` | 下载下来的 ASR 与标点模型 | ~1.8 GB |
-| `~/.local/share/nextless/bin/deep-filter` | 可选降噪器（装过的话） | ~35 MB |
-| `~/.config/autostart/org.fcitx.Fcitx5.desktop` | 你自己加的 fcitx5 自启项 | 1 KB |
-
-要把机器交给别人，先删 `~/.config/nextless/`。想拿回那 1.8 GB 只能删模型目录，
-`nextless-get-models` 会按需重新下载缺的部分。
-
-**确认到底加载的是哪个版本**，否则装了旧版你看不出来：
-
-```bash
-fcitx5-diagnose | grep -i nextless     # 例如 "Nextless 10.12.0"
-```
-
-如果这里显示的数字比你装的 release 旧，说明在跑的还是老 addon：要么安装那步没执行，
-要么 fcitx5 没重启。之前就有一台机器已经升到 0.3.x，`fcitx5-diagnose` 里还写着
-`Nextless 0.2.0`。
+> 预构建 `.deb` 仅 amd64，其他架构请源码构建（详见 docs/install.md）。卸载清理、模型选择、
+> 版本没生效的检查（`fcitx5-diagnose | grep -i nextless`）都在 **[docs/install.md](docs/install.md)**。
 
 ## 使用
 
